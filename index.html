@@ -1298,6 +1298,189 @@ body.noDI #dmgInd,body.noHM #hitm,body.noNT #qPop,body.noFP #perf,body.noSE #vig
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/BokehShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/BokehPass.js"></script>
 <script>
+/* ---------- Doglers utanför claude.ai: konton och multiplayer via Firebase ---------- */
+(function(){
+  const H=location.hostname||'';
+  const ON=/[?&]fb=1\b/.test(location.search)||/(^|\.)(github\.io|localhost|127\.0\.0\.1|itch\.io|itch\.zone|netlify\.app|pages\.dev|vercel\.app|web\.app|firebaseapp\.com)$/i.test(H)||H==='localhost'||H==='127.0.0.1';
+  if(!ON||window.claude)return;
+  const CFG={apiKey:"AIzaSyAeV4-Cna_YactFzeeHvbj0GgnOtBNzY5I",authDomain:"doglers.firebaseapp.com",databaseURL:"https://doglers-default-rtdb.europe-west1.firebasedatabase.app",projectId:"doglers",storageBucket:"doglers.firebasestorage.app",messagingSenderId:"292557183711",appId:"1:292557183711:web:4bc82b6b60a82d0644676a"};
+  const VER='10.14.1',MODS=['app','auth','database'];
+  const NAME_OK=/^[A-Za-z0-9_-]{3,16}$/;
+  let lang='en';try{const p=JSON.parse(localStorage.getItem('ilp.profile.v3')||'{}');if(p&&p.lang==='sv')lang='sv';}catch(e){}
+  const T=(sv,en)=>lang==='sv'?sv:en;
+
+  /* ---- ladda Firebase (gstatic först, jsdelivr som reserv) ---- */
+  const loadJs=src=>new Promise((ok,no)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>{s.remove();no(new Error('load '+src));};document.head.appendChild(s);});
+  async function loadFb(){
+    if(window.firebase&&firebase.database&&firebase.auth)return;
+    for(const base of ['https://www.gstatic.com/firebasejs/'+VER+'/','https://cdn.jsdelivr.net/npm/firebase@'+VER+'/']){
+      try{for(const m of MODS)if(!(window.firebase&&(m==='app'||firebase[m])))await loadJs(base+'firebase-'+m+'-compat.js');return;}catch(e){}
+    }
+    throw new Error('firebase');
+  }
+  let fb=null,auth=null,rt=null;
+  const ready=(async()=>{await loadFb();fb=firebase.apps.length?firebase.app():firebase.initializeApp(CFG);auth=fb.auth();rt=fb.database();})();
+
+  /* ---- dokument: {_j: hela objektet som JSON, + enkla fält för regler och sökningar} ---- */
+  const key=s=>String(s).replace(/[.#$\[\]]/g,'_');
+  const dpath=p=>'g/'+String(p).split('/').filter(Boolean).map(key).join('/');
+  const pack=o=>{const v={_j:JSON.stringify(o==null?null:o)};if(o&&typeof o==='object'&&!Array.isArray(o))for(const k in o){const x=o[k];if(/^[A-Za-z0-9_-]{1,40}$/.test(k)&&k!=='_j'&&(typeof x==='string'||typeof x==='boolean'||(typeof x==='number'&&isFinite(x))))v[k]=x;}return v;};
+  const unpack=v=>{if(v==null)return null;if(typeof v._j==='string'){try{return JSON.parse(v._j);}catch(e){return null;}}return v;};
+  const snapOf=(id,v)=>{const d=unpack(v);return{id,exists:d!=null,data:()=>d==null?undefined:JSON.parse(JSON.stringify(d))};};
+  function docRef(p){
+    const r=()=>rt.ref(dpath(p)),id=String(p).split('/').filter(Boolean).pop();
+    return{id,path:p,
+      async get(){const s=await r().once('value');return snapOf(id,s.val());},
+      async set(o){await r().set(pack(o));},
+      async update(o){const s=await r().once('value');const cur=unpack(s.val());await r().set(pack(Object.assign({},cur&&typeof cur==='object'?cur:{},o)));},
+      async delete(){await r().remove();},
+      onSnapshot(cb,err){const q=r(),f=s=>{try{cb(snapOf(id,s.val()));}catch(e){}};q.on('value',f,e=>err&&err(e));return()=>q.off('value',f);},
+      async acquire(o){o=o||{};const h=String(o.holder||'x'),ttl=Math.max(500,+o.ttlMs||5000);const lr=rt.ref('locks/'+dpath(p).slice(2).replace(/\//g,'~'));
+        const res=await lr.transaction(c=>{const now=Date.now();if(!c||c.e<now||c.h===h)return{h,e:now+ttl,u:auth.currentUser.uid};return;});return{acquired:!!res.committed};}
+    };
+  }
+  function colRef(name){
+    const base=()=>rt.ref(dpath(name));
+    const mk=q=>({where(f,op,v){if(op!=='==')throw new Error('only ==');return mk({f,v});},
+      onSnapshot(cb,err){const qq=q?base().orderByChild(key(q.f)).equalTo(q.v):base();const fn=s=>{const docs=[];s.forEach(c=>{const d=unpack(c.val());if(d!=null)docs.push({id:c.key,data:()=>JSON.parse(JSON.stringify(d))});});try{cb({docs,size:docs.length,empty:!docs.length});}catch(e){}};qq.on('value',fn,e=>err&&err(e));return()=>qq.off('value',fn);},
+      async get(){const qq=q?base().orderByChild(key(q.f)).equalTo(q.v):base();const s=await qq.once('value');const docs=[];s.forEach(c=>{const d=unpack(c.val());if(d!=null)docs.push({id:c.key,data:()=>d});});return{docs,size:docs.length,empty:!docs.length};},
+      doc:id=>docRef(name+'/'+id)});
+    return mk(null);
+  }
+  const dbApi={doc:docRef,collection:colRef};
+
+  /* ---- rum: närvaro, meddelanden och ping ---- */
+  const ME='t'+Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
+  const PRES_HZ=15;
+  function makeRoom(rid){
+    const root=()=>rt.ref('rooms/'+key(rid));
+    const uid=auth.currentUser.uid;
+    let peers=[],pcb=[],mcb={},raw={},cache={},alive=true,joinKey=null;
+    const myRef=root().child('p/'+ME),pgRef=root().child('pg/'+ME);
+    let myPr=null,lastW=0,pend=null,tmr=null,wq=Promise.resolve();
+    const build=()=>{const out=[];for(const k in raw){const v=raw[k];if(!v||typeof v.u!=='string')continue;let pr=cache[k];if(!pr||pr.s!==v.pr){let d=null;try{d=JSON.parse(v.pr);}catch(e){}pr=cache[k]={s:v.pr,d};}
+        out.push({peer:k,kind:'viewer',sameTab:k===ME,presence:pr.d==null?null:pr.d,user:{id:v.u}});}
+      for(const k in cache)if(!raw[k])delete cache[k];peers=out;};
+    const fire=()=>{for(const f of pcb.slice()){try{f({peers:peers.slice()});}catch(e){}}};
+    const onP=s=>{raw=s.val()||{};build();fire();};
+    const onM=s=>{const v=s.val();if(!v||v.f===ME)return;let d=null;try{d=JSON.parse(v.d);}catch(e){}const ls=mcb[v.ty];if(ls)for(const f of ls.slice()){try{f({type:v.ty,data:d,peer:v.f,sameTab:false,user:{id:v.a}});}catch(e){}}};
+    let mq=null;
+    const start=async()=>{
+      myRef.onDisconnect().remove();pgRef.onDisconnect().remove();
+      await myRef.set({u:uid,pr:'null',t:Date.now()});
+      root().child('p').on('value',onP);
+      joinKey=root().child('m').push().key;
+      mq=root().child('m').orderByKey().startAfter(joinKey);mq.on('child_added',onM);
+    };
+    const started=start();
+    const writePr=()=>{tmr=null;if(!alive||pend==null)return;const s=pend;pend=null;lastW=performance.now();wq=wq.then(()=>myRef.update({pr:s,t:Date.now()})).catch(()=>{});};
+    const R={
+      peers:()=>peers.slice(),
+      onPeers(cb,err){pcb.push(cb);started.then(()=>{if(alive&&pcb.includes(cb))try{cb({peers:peers.slice()});}catch(e){}}).catch(e=>err&&err(e));return()=>{pcb=pcb.filter(f=>f!==cb);};},
+      on(ty,cb,err){(mcb[ty]||(mcb[ty]=[])).push(cb);started.catch(e=>err&&err(e));return()=>{mcb[ty]=(mcb[ty]||[]).filter(f=>f!==cb);};},
+      async presence(o){if(!alive)return;await started;myPr=o;let s;try{s=JSON.stringify(o==null?null:o);}catch(e){return;}
+        if(s.length>16000)return;pend=s;const gap=1000/PRES_HZ-(performance.now()-lastW);if(gap<=0){if(tmr){clearTimeout(tmr);}writePr();}else if(!tmr)tmr=setTimeout(writePr,gap);},
+      async emit(ty,data){if(!alive)return;await started;
+        if(ty==='ping'){await pgRef.set(Date.now());const ls=mcb.ping;if(ls)for(const f of ls.slice()){try{f({type:'ping',data,peer:ME,sameTab:true});}catch(e){}}return;}
+        let s;try{s=JSON.stringify(data==null?null:data);}catch(e){return;}if(s.length>30000)return;
+        const ref=root().child('m').push();await ref.set({f:ME,a:uid,ty:String(ty).slice(0,32),d:s,t:Date.now()});setTimeout(()=>ref.remove().catch(()=>{}),8000);},
+      async leave(){if(!alive)return;alive=false;try{await started;}catch(e){}if(tmr)clearTimeout(tmr);root().child('p').off('value',onP);if(mq)mq.off('child_added',onM);
+        pcb=[];mcb={};try{await myRef.onDisconnect().cancel();await pgRef.onDisconnect().cancel();await myRef.remove();await pgRef.remove();}catch(e){}},
+      async join(id){return makeRoom(id);}
+    };
+    return R;
+  }
+
+  /* ---- inloggning ---- */
+  let resolveUser,rejectUser;const userReady=new Promise((a,b)=>{resolveUser=a;rejectUser=b;});
+  let lobby=null;
+  const api={
+    user:()=>userReady.then(()=>({id:async()=>auth.currentUser.uid,name:async()=>auth.currentUser.displayName||''})),
+    db:()=>userReady.then(()=>dbApi),
+    room:()=>userReady.then(()=>{if(!lobby){lobby=makeRoom('lobby');}return lobby;})
+  };
+  window.claude={use:n=>api[n]?api[n]():Promise.reject(new Error('no '+n))};
+  window.DOGLERS_FB={signOut:async()=>{await ready;try{if(lobby)await lobby.leave();}catch(e){}await auth.signOut();try{localStorage.removeItem('ilp.profile.v3');localStorage.removeItem('ilp.fbuid');}catch(e){}location.reload();}};
+
+  const css=`#fbLog{position:fixed;inset:0;z-index:60}#fbLog .tabs2{display:flex;gap:18px}#fbLog .tabs2 button{background:none;border:0;color:var(--muted);font:800 18px var(--display);letter-spacing:.1em;text-transform:uppercase;cursor:pointer;padding:0 0 4px;border-bottom:2px solid transparent}
+#fbLog .tabs2 button[aria-selected=true]{color:var(--fg);border-color:var(--signal)}#fbLog form{display:flex;flex-direction:column;gap:12px;max-width:420px}#fbLog label{display:flex;flex-direction:column;gap:5px}
+#fbLog input{font-family:var(--display);font-size:20px;font-weight:600;background:rgba(0,0,0,.35);color:var(--fg);border:1px solid rgba(233,237,234,.3);padding:9px 12px;min-width:0}
+#fbLog .rowb{display:flex;gap:16px;align-items:center;flex-wrap:wrap}#fbOut{margin-left:4px}`;
+  function ui(){
+    const st=document.createElement('style');st.textContent=css;document.head.appendChild(st);
+    const o=document.createElement('div');o.id='fbLog';o.className='overlay';o.hidden=true;
+    o.innerHTML=`<div class="brief"><div class="eyebrow">${T('Konto','Account')}</div><h1>DOG<br><span>LERS</span></h1>
+<p>${T('Logga in för att spela med kompisar, spara dina pengar och skins och skicka vänförfrågningar.','Sign in to play with friends, keep your money and skins, and send friend requests.')}</p>
+<div class="tabs2" role="tablist"><button type="button" role="tab" data-m="new" aria-selected="true">${T('Skapa konto','Create account')}</button><button type="button" role="tab" data-m="in" aria-selected="false">${T('Logga in','Sign in')}</button></div>
+<form id="fbForm" novalidate>
+<label data-only="new"><span class="lbl">${T('Användarnamn','Username')}</span><input id="fbUser" maxlength="16" autocomplete="username" spellcheck="false" placeholder="${T('t.ex. Hundbaronen','e.g. DogBaron')}"></label>
+<label><span class="lbl">Email</span><input id="fbMail" type="email" autocomplete="email" spellcheck="false" placeholder="namn@exempel.se"></label>
+<label><span class="lbl">${T('Lösenord','Password')}</span><input id="fbPass" type="password" autocomplete="new-password" placeholder="${T('minst 6 tecken','at least 6 characters')}"></label>
+<div class="small" data-only="new">${T('Användarnamn: 3–16 tecken, A–Z, siffror, _ och -','Username: 3–16 characters, A–Z, digits, _ and -')}</div>
+<div class="rowb"><button class="btn" id="fbGo" type="submit">${T('Skapa konto','Create account')}</button><button class="link" id="fbForgot" type="button" hidden>${T('Glömt lösenordet?','Forgot password?')}</button></div>
+<div class="err" id="fbErr" role="alert"></div><div class="msg" id="fbMsg"></div></form>
+<button class="link" id="fbOff" type="button">${T('Spela utan konto (bara mot bottar)','Play without an account (bots only)')}</button></div>`;
+    document.body.appendChild(o);
+    o.addEventListener('keydown',e=>e.stopPropagation());o.addEventListener('keyup',e=>e.stopPropagation());
+    const $=id=>document.getElementById(id);let mode='new',busy=false;
+    const setMode=m=>{mode=m;o.querySelectorAll('.tabs2 button').forEach(b=>b.setAttribute('aria-selected',b.dataset.m===m));o.querySelectorAll('[data-only=new]').forEach(e=>e.hidden=m!=='new');
+      $('fbGo').textContent=m==='new'?T('Skapa konto','Create account'):T('Logga in','Sign in');$('fbForgot').hidden=m!=='in';$('fbPass').autocomplete=m==='new'?'new-password':'current-password';$('fbErr').textContent='';$('fbMsg').textContent='';};
+    o.querySelectorAll('.tabs2 button').forEach(b=>b.onclick=()=>setMode(b.dataset.m));
+    const errTxt=e=>{const c=e&&e.code||'';return({
+      'auth/email-already-in-use':T('Den emailen har redan ett konto. Logga in i stället.','That email already has an account. Sign in instead.'),
+      'auth/invalid-email':T('Emailen ser inte rätt ut.','That email doesn\'t look right.'),
+      'auth/weak-password':T('Lösenordet måste vara minst 6 tecken.','The password needs at least 6 characters.'),
+      'auth/invalid-credential':T('Fel email eller lösenord.','Wrong email or password.'),'auth/wrong-password':T('Fel email eller lösenord.','Wrong email or password.'),'auth/user-not-found':T('Fel email eller lösenord.','Wrong email or password.'),
+      'auth/too-many-requests':T('För många försök. Vänta en stund.','Too many attempts. Wait a moment.'),
+      'auth/network-request-failed':T('Ingen kontakt med servern. Kolla internet.','Can\'t reach the server. Check your connection.'),
+      'auth/unauthorized-domain':T('Den här sidan är inte godkänd i Firebase (Authorized domains).','This site isn\'t an authorized domain in Firebase.'),
+      'auth/operation-not-allowed':T('Inloggning med email är inte påslagen i Firebase.','Email sign-in isn\'t enabled in Firebase.')
+    })[c]||T('Något gick fel: ','Something went wrong: ')+(c||e&&e.message||e);};
+    $('fbForgot').onclick=async()=>{const m=$('fbMail').value.trim();if(!m){$('fbErr').textContent=T('Skriv din email först.','Enter your email first.');return;}
+      try{await ready;await auth.sendPasswordResetEmail(m);$('fbErr').textContent='';$('fbMsg').textContent=T('Kolla din email för att byta lösenord.','Check your email to reset your password.');}catch(e){$('fbErr').textContent=errTxt(e);}};
+    $('fbOff').onclick=()=>{o.hidden=true;bootVis(true);rejectUser(new Error('offline'));};
+    $('fbForm').onsubmit=async ev=>{ev.preventDefault();if(busy)return;const err=$('fbErr');err.textContent='';$('fbMsg').textContent='';
+      const u=$('fbUser').value.trim(),m=$('fbMail').value.trim(),p=$('fbPass').value;
+      if(mode==='new'&&!NAME_OK.test(u)){err.textContent=T('Användarnamnet måste vara 3–16 tecken: A–Z, siffror, _ eller -.','Username must be 3–16 characters: A–Z, digits, _ or -.');return;}
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m)){err.textContent=T('Skriv en riktig email.','Enter a real email.');return;}
+      if(p.length<6){err.textContent=T('Lösenordet måste vara minst 6 tecken.','The password needs at least 6 characters.');return;}
+      busy=true;$('fbGo').disabled=true;
+      try{await ready;
+        if(mode==='new'){const k=u.toLowerCase();const s=await rt.ref(dpath('names/'+k)).once('value');if(s.exists()){err.textContent=T('Användarnamnet är redan taget.','That username is taken.');return;}
+          pendingName=u;const c=await auth.createUserWithEmailAndPassword(m,p);try{await c.user.updateProfile({displayName:u});}catch(e){}}
+        else await auth.signInWithEmailAndPassword(m,p);
+      }catch(e){pendingName=null;err.textContent=errTxt(e);}finally{busy=false;$('fbGo').disabled=false;}};
+    return o;
+  }
+  let pendingName=null,ov=null;
+  function bootVis(v){const b=document.getElementById('bootScr');if(b)b.style.visibility=v?'':'hidden';}
+  async function claimName(u,name){
+    const k=name.toLowerCase(),ref=rt.ref(dpath('names/'+k));
+    const r=await ref.transaction(c=>{if(c&&c.uid&&c.uid!==u)return;return pack({uid:u});});
+    if(!r.committed)return false;
+    await rt.ref(dpath('players/'+u)).set(pack({name,key:k}));return true;
+  }
+  function outBtn(){const who=document.querySelector('#menu .who');if(!who||document.getElementById('fbOut'))return;const b=document.createElement('button');b.className='link';b.id='fbOut';b.type='button';b.textContent=T('Logga ut','Sign out');b.onclick=()=>window.DOGLERS_FB.signOut();who.appendChild(b);}
+  function boot(){
+    ov=ui();
+    ready.then(()=>{
+      auth.onAuthStateChanged(async u=>{
+        if(!u){ov.hidden=false;bootVis(false);setTimeout(()=>{const f=document.getElementById(ov.querySelector('[data-only=new]').hidden?'fbMail':'fbUser');if(f)f.focus();},60);return;}
+        let last=null;try{last=localStorage.getItem('ilp.fbuid');}catch(e){}
+        if(last&&last!==u.uid){try{localStorage.removeItem('ilp.profile.v3');localStorage.setItem('ilp.fbuid',u.uid);}catch(e){}location.reload();return;}
+        try{localStorage.setItem('ilp.fbuid',u.uid);}catch(e){}
+        const nm=pendingName||u.displayName;pendingName=null;
+        if(nm&&NAME_OK.test(nm)){try{const pl=await rt.ref(dpath('players/'+u.uid)).once('value');if(!pl.exists())await claimName(u.uid,nm);}catch(e){}}
+        ov.hidden=true;bootVis(true);outBtn();resolveUser();
+      });
+    }).catch(()=>{ov.hidden=false;const e=document.getElementById('fbErr');e.textContent=T('Kunde inte ladda inloggningen. Kolla internet och ladda om sidan.','Couldn\'t load sign-in. Check your connection and reload.');document.getElementById('fbGo').disabled=true;});
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+  setInterval(outBtn,2000);
+})();
+
+</script>
+<script>
 (function(){
 const $=id=>document.getElementById(id);
 const PI=Math.PI,TAU=PI*2;
@@ -6715,7 +6898,7 @@ async function netInit(){
   try{[db,room,user]=await Promise.all(['db','room','user'].map(n=>Promise.resolve(window.claude.use(n)).catch(()=>null)));}catch(e){}
   NET.db=db;NET.room=room;NET.user=user;
   if(user){try{NET.uid=await user.id();}catch(e){}}
-  if(!db||!room||!NET.uid){NET.why='Multiplayer kräver att du är inloggad och att ägaren har delat spelet med dig som Redigerare.';return;}
+  if(!db||!room||!NET.uid){NET.why=window.DOGLERS_FB?L('Logga in för att spela multiplayer och lägga till vänner. Ladda om sidan för att logga in.','Sign in to play multiplayer and add friends. Reload the page to sign in.'):'Multiplayer kräver att du är inloggad och att ägaren har delat spelet med dig som Redigerare.';return;}
   NET.on=true;
   try{const ps=await db.doc(privPath()).get();
     if(ps.exists){const d=ps.data()||{};profile.money=Math.max(0,d.money|0);profile.owned=Array.isArray(d.owned)&&d.owned.length?d.owned.filter(x=>typeof x==='string').slice(0,200):['std'];if(!profile.owned.includes('std'))profile.owned.unshift('std');if(Array.isArray(d.guns))profile.guns=d.guns.filter(x=>GUNS[x]);if(GUNS[d.primary]&&!GUNS[d.primary].side)profile.primary=d.primary;if(d.skinFor&&typeof d.skinFor==='object')profile.skinFor=Object.assign({},d.skinFor);else if(d.skin)profile.skinFor={k9:d.skin,m2:d.skin};if(Array.isArray(d.sights))profile.sights=d.sights.filter(x=>typeof x==='string');if(d.sightFor&&typeof d.sightFor==='object')profile.sightFor=Object.assign({},d.sightFor);if(Array.isArray(d.attOwned))profile.attOwned=d.attOwned.filter(x=>typeof x==='string').slice(0,20);if(d.attFor&&typeof d.attFor==='object')profile.attFor=Object.assign({},d.attFor);if(d.range&&typeof d.range==='object')profile.range=Object.assign({},profile.range,d.range);if(d.rangeBest&&typeof d.rangeBest==='object'){if(!profile.rangeBest||typeof profile.rangeBest!=='object')profile.rangeBest={};for(const k in d.rangeBest)profile.rangeBest[k]=Math.max(profile.rangeBest[k]|0,d.rangeBest[k]|0);}if(Array.isArray(d.codes)){const cs=new Set((profile.codes||[]).concat(d.codes.filter(x=>typeof x==='string')));profile.codes=[...cs];}if(d.packInv&&typeof d.packInv==='object'&&!Array.isArray(d.packInv))profile.packInv=Object.assign({},d.packInv);for(const k of ['q','lt','ev','sp','dr'])if(d[k]&&typeof d[k]==='object'&&!Array.isArray(d[k]))profile[k]=JSON.parse(JSON.stringify(d[k]));fixProfile();applySights();applyAtts();if(!profile.guns.includes(profile.primary))profile.primary='k9';applySkins();}
