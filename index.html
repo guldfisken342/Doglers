@@ -1141,6 +1141,7 @@ body.noDI #dmgInd,body.noHM #hitm,body.noNT #qPop,body.noFP #perf,body.noSE #vig
           <div class="sRow"><div class="sL"><b>Huvudvolym</b><small>Allt ljud i spelet</small></div><div class="sC"><label class="sRng"><input type="range" id="volIn" min="0" max="1" step="0.05" aria-label="Huvudvolym"><b id="volV">80</b></label></div></div>
           <div class="sRow"><div class="sL"><b>Musik</b><small>Musiken i lobbyn</small></div><div class="sC"><label class="sRng"><input type="range" id="musIn" min="0" max="1" step="0.05" aria-label="Musik"><b id="musV">45</b></label></div></div>
           <div class="sRow"><div class="sL"><b>Ljudeffekter</b><small>Skott, steg, explosioner och menyljud</small></div><div class="sC"><label class="sRng"><input type="range" id="sfxIn" min="0" max="1" step="0.05" aria-label="Ljudeffekter"><b id="sfxV">100</b></label></div></div>
+          <div class="sRow"><div class="sL"><b>Speakerröst</b><small>En röst som ropar ut rundan när den börjar</small></div><div class="sC"><label class="sSw"><input type="checkbox" id="annTog"><i></i></label></div></div>
           <div class="sRow"><div class="sL"><b>Röstchatt</b><small>Spelet har ingen röstchatt än. Nivån sparas till dess.</small></div><div class="sC"><label class="sRng"><input type="range" id="vcIn" min="0" max="1" step="0.05" aria-label="Röstchatt"><b id="vcV">80</b></label></div></div>
         </div>
         <div class="setPane" data-s="ctl" role="tabpanel" hidden>
@@ -2814,6 +2815,66 @@ const MAP_IDS=Object.keys(MAPS).filter(k=>!MAPS[k].range);
 let MAP=MAPS.kvarteret,curMap=null;
 const mapCache={};
 const hemi=new THREE.HemisphereLight(C(0xbfd2e6),C(0x4a4436),0.55);scene.add(hemi);
+/* ---------- v36: arkitekturdetaljer på husen (som Slottet): fönster- och dörrkarmar, fönsterbänkar, våningsband, takkrön,
+   hörnpilastrar, vägglampor vid ytterdörrarna och prylar på platta tak. Läser öppningarna direkt ur väggarnas rutnät. ---------- */
+const ARCH={
+  kvarteret:{trim:0xcfc6b4,frame:0x2c3034,sill:0xbdb4a2,corner:0xb9ad98,lampC:0xffd7a0,roofJunk:1},
+  oasen:{trim:0xd6bf95,frame:0x5b3a20,sill:0xc8ad80,corner:0xc9b087,lampC:0xffb867,lantern:1},
+  fjallstugan:{trim:0x3a281b,frame:0xeee9df,sill:0xf4f6f8,corner:0x3a281b,lampC:0xffcf8a,cornerW:.42},
+  hamnen:{trim:0x3b4148,frame:0x22262a,sill:0x4b5259,corner:0x2e3338,lampC:0xffe6c0,roofJunk:1,cage:1}
+};
+function archDress(g,id){
+  const A=ARCH[id];if(!A)return;
+  const mk=(k,col,o)=>mat('ar'+id+k,()=>std(Object.assign({color:C(col),roughness:.78},o||{})));
+  const tm=mk('t',A.trim),fm=mk('f',A.frame,{roughness:.55,metalness:.15,envMap:ENV,envMapIntensity:.4}),sm=mk('s',A.sill),cm=mk('c',A.corner);
+  const lampM=mat('arLampB',()=>std({color:C(0x1f2224),roughness:.45,metalness:.7,envMap:ENV,envMapIntensity:.5})),bulbM=mat('arBulb'+id,()=>std({color:C(0xffffff),emissive:C(A.lampC),emissiveIntensity:2.2}));
+  const lv=(MAP.levels||[0]).filter(y=>y>=0);
+  let lamps=0;
+  const box=(m,w,h,d,x,y,z)=>{const o=fb(g,m,w,h,d,x,y,z);o.castShadow=h>.12||w>.3;o.receiveShadow=true;return o;};
+  for(const r of ROOFS){const h=r.hr||r.h||3,flat=!r.pitch&&id!=='fjallstugan';
+    const E=[['x',r.z0,r.x0,r.x1,-1],['x',r.z1,r.x0,r.x1,1],['z',r.x0,r.z0,r.z1,-1],['z',r.x1,r.z0,r.z1,1]];
+    for(const [ax,f,a0,a1,od] of E){
+      // väggen längs kanten: första cellraden innanför ytterytan
+      const q=od<0?c0(f):c1(f)-1,ia=c0(a0),ib=c1(a1),k0=c0(GLY),k1=c1(h+GLY),NA=ib-ia,NK=k1-k0;if(NA<=0||NK<=0)continue;
+      const cell=(a,k)=>{const i=ax==='x'?ia+a:q,j=ax==='x'?q:ia+a;if(i<0||j<0||i>=GX||j>=GZ)return -1;return btype[idx(i,j,k0+k)];};
+      let solid=0;for(let a=0;a<NA;a++)for(let k=0;k<NK;k++){const t=cell(a,k);if(t&&t!==8)solid++;}
+      if(solid<NA*NK*.35)continue;   // ingen riktig vägg här (gård, öppen sida)
+      // låda längs kanten: s = läge längs väggen, y, längd, höjd, djup (sticker ut dep-.1 från väggen)
+      const P=(s,y,len,hh,dep,m)=>{const off=f+od*(dep/2-.1);return ax==='x'?box(m,len,hh,dep,s,y,off):box(m,dep,hh,len,off,y,s);};
+      const L=a1-a0,mid=(a0+a1)/2;
+      P(mid,h-.16,L+.5,.32,.4,tm);P(mid,h-.38,L+.36,.1,.28,tm);                                  // takkrön i två steg
+      for(const y of lv)if(y>.5&&y<h-.6)P(mid,y,L+.24,.2,.24,tm);                                   // våningsband
+      // öppningar (glas eller tomt) → karmar, fönsterbänkar, överstycken och lampor vid dörrar
+      const seen=new Uint8Array(NA*NK),isO=(a,k)=>{const t=cell(a,k);return t===0||t===8;};
+      for(let a=0;a<NA;a++)for(let k=0;k<NK;k++){if(seen[a*NK+k]||!isO(a,k))continue;
+        let amin=a,amax=a,kmin=k,kmax=k,glass=false;const st=[[a,k]];seen[a*NK+k]=1;
+        while(st.length){const [x,y]=st.pop();if(cell(x,y)===8)glass=true;amin=Math.min(amin,x);amax=Math.max(amax,x);kmin=Math.min(kmin,y);kmax=Math.max(kmax,y);
+          for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const nx=x+dx,ny=y+dy;if(nx<0||ny<0||nx>=NA||ny>=NK||seen[nx*NK+ny]||!isO(nx,ny))continue;seen[nx*NK+ny]=1;st.push([nx,ny]);}}
+        const s0=(ia+amin)*CS,s1=(ia+amax+1)*CS,yb=(k0+kmin)*CS-GLY,yt=(k0+kmax+1)*CS-GLY,w=s1-s0,ht=yt-yb;
+        if(w>5||ht>4.2||w<.4||ht<.4||kmax>=NK-1||amin===0||amax===NA-1)continue;
+        const base=lv.filter(y=>y<=yb+.05).pop()||0,door=yb-base<.3,sm2=(s0+s1)/2;
+        P(s0-.06,yb+ht/2,.12,ht,.18,fm);P(s1+.06,yb+ht/2,.12,ht,.18,fm);P(sm2,yt+.08,w+.36,.16,.24,fm);   // karm och överstycke
+        if(!door){P(sm2,yb-.05,w+.34,.1,.32,sm);if(glass&&w>.9)P(sm2,yb+ht/2,.06,ht,.12,fm);}              // fönsterbänk och mittpost
+        else if(base===0&&lamps<10&&ht>1.6){lamps++;const sL=s1+.42,y=Math.min(yt+.1,2.5),off=f+od*.16;   // vägglampa bredvid ytterdörren
+          const px=ax==='x'?sL:off,pz=ax==='x'?off:sL;
+          if(A.lantern){const lg=new THREE.Group();lg.position.set(px,y,pz);g.add(lg);fb(lg,lampM,.2,.04,.2,0,.17,0);fb(lg,lampM,.16,.04,.16,0,-.13,0);fb(lg,bulbM,.12,.22,.12,0,0,0);}
+          else{fb(g,lampM,ax==='x'?.16:.12,.22,ax==='x'?.12:.16,px,y,pz);fb(g,bulbM,ax==='x'?.11:.06,.12,ax==='x'?.06:.11,px+(ax==='x'?0:od*.06),y-.02,pz+(ax==='x'?od*.06:0));}
+          {const Lt=new THREE.PointLight(C(A.lampC),.9,6.5,2);Lt.position.set(ax==='x'?px:px+od*.3,y,ax==='x'?pz+od*.3:pz);g.add(Lt);}}
+      }
+    }
+    // hörnpilastrar
+    const cw=A.cornerW||.36;for(const [x,z] of [[r.x0,r.z0],[r.x1,r.z0],[r.x0,r.z1],[r.x1,r.z1]]){const sx=x===r.x0?-1:1,sz=z===r.z0?-1:1;
+      box(cm,cw,h,cw,x+sx*(cw/2-.12),h/2,z+sz*(cw/2-.12));}
+    // platta tak: ventilationshuvar, rör, en antenn och en parabol
+    if(A.roofJunk&&flat){const top=h+.25+.13,rng=(a,b)=>a+Math.random()*(b-a),mm=mat('arRoofM',()=>std({color:C(0x8e959b),roughness:.45,metalness:.65,envMap:ENV,envMapIntensity:.5}));
+      for(let n=0;n<4;n++){const x=rng(r.x0+1.5,r.x1-1.5),z=rng(r.z0+1.5,r.z1-1.5);box(mm,.55,.45,.55,x,top+.22,z);box(mm,.7,.06,.7,x,top+.5,z);}
+      for(let n=0;n<3;n++){const x=rng(r.x0+1,r.x1-1),z=rng(r.z0+1,r.z1-1);const p=fc(g,mm,.07,.07,.9,x,top+.45,z,8);p.castShadow=true;fc(g,mm,.12,.1,.12,x,top+.92,z,8);}
+      {const x=r.x1-1.4,z=r.z0+1.4;fc(g,mm,.03,.04,2.6,x,top+1.3,z,6);for(const y of [1.6,2.1,2.5])fb(g,mm,.9-y*.2,.03,.03,x,top+y,z);}
+      {const x=r.x0+1.6,z=r.z1-1.6,d=new THREE.Mesh(new THREE.SphereGeometry(.45,14,8,0,TAU,0,PI*.32),mat('arDish',()=>std({color:C(0xdcdcd6),roughness:.5,side:THREE.DoubleSide})));
+        d.position.set(x,top+.5,z);d.rotation.set(-.9,.6,0);g.add(d);fc(g,mm,.03,.03,.5,x,top+.25,z,6);}}
+  }
+}
+
 function loadMap(id){
   const M=MAPS[id];if(!M)return;
   if(mapGroup)scene.remove(mapGroup);
@@ -2827,7 +2888,7 @@ function loadMap(id){
   let grp=mapCache[id];const first=!grp;if(first)grp=mapCache[id]=new THREE.Group();
   mapGroup=grp;grp.position.y=GLY;scene.add(grp);
   addSolids=first;buildLevel();addSolids=false;makeBlockMesh();
-  if(first){M.decor(grp);grp.userData.lights=extractLights(grp);batchStatic(grp);}
+  if(first){M.decor(grp);try{archDress(grp,id);}catch(e){console.warn('arch',e);}grp.userData.lights=extractLights(grp);batchStatic(grp);}
   MAPL=grp.userData.lights||[];skyMat.uniforms.cov.value=({kvarteret:.5,oasen:.24,fjallstugan:.78,hamnen:.6,slottet:.45,skjutbana:.42})[id]??.5;applyAtmo();applyWet();mapEnv(id,M);setIndoor(M);try{volLights();}catch(e){console.warn('vol',e);}
   grass=grp.userData.grass||null;snowFx=grp.userData.snow||null;try{applyTexQ();}catch(e){}warmShaders();
   if(grass){grass.root.visible=true;grassQ();}
@@ -5199,7 +5260,7 @@ function buildSoldier(team,gunMat,opt){opt=opt||{};
   s.setGun=(mat,len)=>{if(mat)gun.material=mat;gunG.scale.z=len||1;};
   animSoldier(s,{spd:0},0);
   return s;}
-const EMgun=std({color:C(0x1c1f22),roughness:.42,metalness:.65,envMap:ENV,envMapIntensity:.6});
+const EMgun=std({color:C(0x1c1f22),roughness:.36,metalness:.7,envMap:ENV,envMapIntensity:.85});
 // tvåleds-IK: överarm och underarm når en punkt, armbågen pekar mot 'pole'
 const _iT=new THREE.Vector3(),_iD=new THREE.Vector3(),_iU=new THREE.Vector3(),_iP=new THREE.Vector3(),_iE=new THREE.Vector3(),_iQ=new THREE.Quaternion(),_iQ2=new THREE.Quaternion();
 function ik2(arm,T){const S=arm.up.position;_iD.subVectors(T,S);let d=_iD.length();const a=arm.a,b=arm.b;
@@ -6561,11 +6622,11 @@ function bounce(g){const s=spatial(g.p.x,g.p.y,g.p.z,25);sfx.tink(s.v,s.pan);}
 function clearNades(){grenades.forEach(g=>scene.remove(g.m));grenades=[];}
 function explodeAt(c,by,mine){
   const R=1.6,s=spatial(c.x,c.y,c.z,90);sfx.boom(Math.max(.15,s.v),s.pan);shake=Math.max(shake,.7*Math.max(.2,1-s.d/25));
-  boomLight.position.set(c.x,c.y+.5,c.z);boomLight.color.copy(BOOMC);boomLight.intensity=8;
+  boomLight.position.set(c.x,c.y+.5,c.z);boomLight.color.copy(BOOMC);boomLight.intensity=11;
   const i0=Math.floor((c.x-R)/CS),i1=Math.floor((c.x+R)/CS),j0=Math.floor((c.z-R)/CS),j1=Math.floor((c.z+R)/CS),k0=Math.max(0,Math.floor((c.y-R)/CS)),k1=Math.min(GY-1,Math.floor((c.y+R)/CS));
   for(let k=k0;k<=k1;k++)for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++){if(i<0||j<0||i>=GX||j>=GZ)continue;const n=idx(i,j,k);if(!DESTR[btype[n]])continue;
     const p=cellCenter(n);if(Math.hypot(p[0]-c.x,p[1]-c.y,p[2]-c.z)<R*rand(.88,1.08))removeBlock(n,Math.random()<.12?1:0);}
-  sparks.spawn(c.x,c.y,c.z,1,.7,.25,40,5,.05,.5);fireball(c.x,c.y,c.z);debris.spawn(c.x,c.y,c.z,.3,.28,.25,26,5,.07,8,'rock');
+  sparks.spawn(c.x,c.y,c.z,1,.7,.25,40,5,.05,.5);sparks.spawn(c.x,c.y+.2,c.z,1,.45,.12,30,3.2,.035,1.5);fireball(c.x,c.y,c.z);setTimeout(()=>{smoke(c.x,c.y+.6,c.z,5,1.5,4.6,.9,.3,.5);fireball(c.x+rand(-.3,.3),c.y+.4,c.z+rand(-.3,.3));},140);debris.spawn(c.x,c.y,c.z,.3,.28,.25,26,5,.07,8,'rock');
   smoke(c.x,c.y+.3,c.z,7,1.2,3.2,1.6,.55,.6);
   if(P.alive&&G.ph==='live'){const d=Math.hypot(P.x-c.x,P.y+P.eye-.6-c.y,P.z-c.z);
     if(d<5.5){let dmg=120*(1-d/5.5);if(!los(c.x,c.y+.15,c.z,P.x,P.y+P.eye-.3,P.z))dmg*=.35;
@@ -6843,9 +6904,54 @@ function onRoundStart(){
   if(G.mode!=='range')setTimeout(()=>feedText('Guldpottan står på '+floorName(G.core.y||0)+' den här rundan'),400);
   if(MAP.dark)setTimeout(()=>feedText('Det är mörkt i slottet · T tänder ficklampan'),2200);
 }
+/* ---------- speakerrösten: djup actionröst och trumsmäll när rundan börjar ---------- */
+const ANN={voice:null,lang:null,last:0,n:0};
+function annPickVoice(){
+  const ss=window.speechSynthesis;if(!ss)return null;const vs=ss.getVoices()||[];if(!vs.length)return null;
+  const sv=LANG==='sv',want=sv?/^sv/i:/^en/i;
+  // bäst först: naturliga mansröster (Edge), sedan andra mansröster, sedan vad som helst på rätt språk
+  const pref=sv?[/Mattias/i,/Sven|Mans|Male|man/i]:[/Guy.*Natural|Christopher.*Natural|Eric.*Natural|Davis.*Natural|Andrew.*Natural|Roger.*Natural|Steffan.*Natural|Ryan.*Natural/i,/Natural/i,/Google UK English Male/i,/David|Mark|George|Daniel|Male|Guy|Christopher|Eric|Ryan/i];
+  const pool=vs.filter(v=>want.test(v.lang));
+  for(const re of pref){const v=pool.find(v=>re.test(v.name)&&!/Female|Aria|Jenny|Sonia|Libby|Sofie|Hillevi|Zira|Hazel|Susan|Samantha/i.test(v.name));if(v)return v;}
+  return pool[0]||null;
+}
+try{if(window.speechSynthesis){speechSynthesis.addEventListener('voiceschanged',()=>{ANN.voice=null;});}}catch(e){}
+function annSay(text,o){
+  o=o||{};const ss=window.speechSynthesis;if(!ss||profile.announcer===false)return false;
+  if(!ANN.voice||ANN.lang!==LANG){ANN.voice=annPickVoice();ANN.lang=LANG;}
+  try{ss.cancel();const u=new SpeechSynthesisUtterance(text);if(ANN.voice){try{u.voice=ANN.voice;}catch(e){}u.lang=ANN.voice.lang;}else u.lang=LANG==='sv'?'sv-SE':'en-US';
+    const nat=ANN.voice&&/Natural|Online/i.test(ANN.voice.name);
+    u.pitch=o.pitch!=null?o.pitch:(nat?.8:.45);u.rate=o.rate!=null?o.rate:(nat?.92:.82);u.volume=clamp(volMain()*volSfx()*1.15,0,1);
+    ss.speak(u);ANN.n++;ANN.lastText=text;return true;}catch(e){return false;}
+}
+// filmisk smäll: djup sub-trumma + metallisk klang + lång efterklang
+function annHit(big){
+  if(!AC||profile.announcer===false)return;initRev&&initRev();const v=big?1:.75;
+  tn(72,1.4,.55*v,'sine',28);tn(48,1.8,.4*v,'sine',24);
+  nz(.9,520,'lowpass',.5*v,60,1.2);nz(.25,2400,'bandpass',.16*v,900,3);
+  tn(196,1.2,.05*v,'sawtooth',98);tn(293,1.1,.035*v,'sawtooth',146);
+}
+function annRiser(){if(!AC||profile.announcer===false)return;nz(1.2,300,'bandpass',.06,2400,4);tn(110,1.1,.04,'sawtooth',220);}
+function annLines(){
+  const n=Math.max(1,G.rd|0),last=G.target&&(G.sa===G.target-1||G.sb===G.target-1),mine=P.team==='A'?G.sa:G.sb,their=P.team==='A'?G.sb:G.sa;
+  const pick=a=>a[(n+ANN.n)%a.length];
+  if(LANG==='sv'){
+    const head=last?(mine===G.target-1&&their===G.target-1?'Sista rundan. Allt avgörs nu.':mine===G.target-1?'Matchboll för ert lag.':'Fienden har matchboll. Slå tillbaka.'):'Runda '+n+'.';
+    return [head,pick(['Ta guldpottan... eller utplåna fiendelaget!','Bär hem guldpottan... eller lämna ingen hund kvar!','Guldpottan väntar. Ta den, eller slå ut dem alla!'])];
+  }
+  const head=last?(mine===G.target-1&&their===G.target-1?'Final round. Everything is on the line.':mine===G.target-1?'Match point for your team.':'The enemy has match point. Fight back.'):'Round '+n+'.';
+  return [head,pick(['Grab the golden potty... or wipe out the enemy team!','Bring the golden potty home... or leave no dog standing!','The golden potty is waiting. Take it... or take them all down!'])];
+}
+function announce(ph){
+  if(state!=='game'||G.mode==='range'||!G.mode)return;const now=performance.now();
+  if(ph==='prep'){if(now-ANN.last<2500)return;ANN.last=now;const [a,b]=annLines();annHit(true);setTimeout(()=>annSay(a+' '+b),260);}
+  else if(ph==='live'){annRiser();setTimeout(()=>{annHit(false);annSay(LANG==='sv'?'Kör!':'Fight!',{rate:.9});},350);}
+}
+
 function onPhase(){
   const key=G.rd+':'+G.ph;if(key===lastPhKey)return;const prev=lastPhKey;lastPhKey=key;
   if(G.ph==='live')P.protT=5;
+  if(G.ph==='prep'||(G.ph==='live'&&prev.endsWith(':prep')))announce(G.ph);
   if(G.ph==='end'){
     const won=G.win===P.team,draw=G.win==='D'||!G.win,ex=!!G.ex&&won;
     let m=won?(ex?700:300):draw?150:100;if(G.ex&&G.ex===myId())m+=400;const got=addMoney(m);sfx.cash();
@@ -7665,7 +7771,7 @@ const EN={
  'Våta ytor':'Wet surfaces','Pölar och blanka, fuktiga golv på Slottet och i Hamnen':'Puddles and glossy damp floors at the Castle and the Harbour','Ficklampa':'Flashlight','Nattfärg':'Night colour','I svagt ljus drar färgerna åt kallt blått som i månsken, facklor och ficklampa behåller sin värme · Slottet':'In dim light colours shift towards cool moonlit blue, torches and the flashlight keep their warmth · the Castle','Ljuskägla i luften':'Light beam in the air','Strålen syns i dammig luft och mörker · Effektkvalitet Medel och Hög':'The beam shows in dusty air and darkness · Effects quality Medium and High','Damm i ljuset':'Dust in the light','Små korn som glittrar när de hamnar i strålen':'Tiny specks that glitter when they drift into the beam','Studsljus':'Bounce light','Ytan du lyser på sprider ljuset vidare ut i rummet':'The surface you light up spreads the light into the room','Mjuk följning':'Smooth follow','Ljuset släpar en aning efter när du vänder dig, som en riktig lampa i handen':'The light trails slightly when you turn, like a real hand-held light','Upplösning och mjukhet på skuggorna · ficklampan kastar skuggor från Medel · Ultra: mjuka kontaktskuggor':'Resolution and softness of shadows · the flashlight casts shadows from Medium · Ultra: soft contact shadows',
  'Nätverk':'Network','Direktkontakt mellan spelare':'Direct connection between players','Skickar positioner och skott direkt mellan datorerna. Lägre ping, servern tar över om det inte går':'Sends positions and shots straight between the computers. Lower ping, the server takes over if it does not work','Förutse rörelser':'Predict movement','Visar andra spelare där de är nu i stället för där de var för en ping sedan':'Shows other players where they are now instead of where they were one ping ago','Sänk grafiken vid låg FPS':'Lower graphics at low FPS','Om spelet går trögt i flera sekunder sänks grafikkvaliteten ett steg':'If the game runs slowly for several seconds, graphics quality drops one step',
  'Linsreflexer':'Lens flares','Ljusreflexer i kameran när du tittar mot solen · Hög och Ultra':'Light reflections in the lens when you look at the sun · High and Ultra','Miljö':'Environment','Höjddimma':'Height fog','Ljuskäglor från lampor':'Light cones from lamps','Synliga strålar och sken runt lampor i mörker och skymning':'Visible beams and glow around lamps in the dark and at dusk','Dis som ligger tätt vid marken och lyser mot solen':'Haze that hugs the ground and glows towards the sun','Fåglar på himlen':'Birds in the sky','Flockar som flyger över kartan · Effektkvalitet Medel och Hög':'Flocks flying over the map · Effects quality Medium and High','Upplösning och mjukhet på skuggorna · Ultra: mjuka kontaktskuggor':'Resolution and softness of shadows · Ultra: soft contact shadows',
- 'Inställningar':'Settings','byt kategori':'switch category','nästa val':'next option','Stäng':'Close','Kategorier':'Categories','Grafik':'Graphics','Bild, kvalitet och effekter':'Display, quality and effects','Ljud':'Audio','Volym för allt du hör':'Volume for everything you hear','Kontroller':'Controls','Tangenter, mus och handkontroll':'Keys, mouse and controller','Spel':'Gameplay','Språk, HUD och hårkors':'Language, HUD and crosshair','Bild':'Display','Upplösning':'Resolution','Visningsläge':'Display mode','Fönster':'Windowed','Helskärm':'Fullscreen','Helskärm döljer webbläsarens ramar':'Fullscreen hides the browser frame','Av ger kortare fördröjning men mer arbete för datorn':'Off lowers latency but makes the computer work harder','FPS-gräns':'FPS limit','Högsta antal bilder per sekund':'Maximum frames per second','Obegränsad':'Unlimited','Sänker upplösningen lite när bildtakten faller':'Lowers the resolution a little when the frame rate drops','Kvalitet':'Quality','Grafikkvalitet':'Graphics quality','Anpassad':'Custom','Ställer in alla val nedanför på en gång':'Sets every option below at once','Låg':'Low','Medel':'Medium','Hög':'High','Texturkvalitet':'Texture quality','Skärpa på ytor som syns snett':'Sharpness on surfaces seen at an angle','Skuggkvalitet':'Shadow quality','Upplösning och mjukhet på skuggorna':'Resolution and softness of shadows','Av':'Off','Kantutjämning':'Anti-aliasing','Jämnar ut hackiga kanter':'Smooths jagged edges','Effektkvalitet':'Effects quality','Partiklar, ljuskällor och damm i luften':'Particles, light sources and dust in the air','Siktavstånd':'Render distance','Hur långt bort världen ritas':'How far the world is drawn','Kort':'Short','Långt':'Far','Efterbehandling':'Post-processing','Ljus, färger och djup efter att bilden ritats':'Light, colour and depth after the image is drawn','Starkt ljus glöder':'Bright light glows','Ambient ocklusion':'Ambient occlusion','Mjuka skuggor i hörn och skarvar · Hög och Ultra':'Soft shadows in corners and seams · High and Ultra','Solstrålar':'Sun rays','Ljusstrålar från solen · Hög och Ultra':'Light shafts from the sun · High and Ultra','Skärpedjup i lobbyn':'Lobby depth of field','Bakgrunden blir mjukt suddig · Hög och Ultra':'The background gets softly blurred · High and Ultra','Rörelseoskärpa':'Motion blur','Bilden suddas lite när du vänder dig snabbt':'The image blurs a little when you turn fast','Volym':'Volume','Huvudvolym':'Master volume','Allt ljud i spelet':'All sound in the game','Musik':'Music','Musiken i lobbyn':'Music in the lobby','Ljudeffekter':'Sound effects','Skott, steg, explosioner och menyljud':'Shots, footsteps, explosions and menu sounds','Röstchatt':'Voice chat','Spelet har ingen röstchatt än. Nivån sparas till dess.':'The game has no voice chat yet. The level is saved until then.','Mus':'Mouse','Muskänslighet':'Mouse sensitivity','Hur snabbt du vänder dig':'How fast you turn','Känslighet vid sikte':'Aim sensitivity','Gånger muskänsligheten när du siktar':'Multiplies mouse sensitivity while aiming','Invertera mus':'Invert mouse','Musen upp tittar ner':'Mouse up looks down','Sikta med klick':'Click to aim','Ett klick på höger knapp siktar, ett till släpper':'One right click aims, another releases','Tangenter':'Keys','Klicka på en tangent och tryck sedan på den nya. Esc avbryter. Används tangenten redan byter de två plats.':'Click a key, then press the new one. Esc cancels. If the key is already used, the two swap.','Återställ tangenter':'Reset keys','Handkontroll':'Controller','Status':'Status','Använd handkontroll':'Use controller','Xbox, PlayStation och andra handkontroller':'Xbox, PlayStation and other controllers','Spakkänslighet':'Stick sensitivity','Hur snabbt höger spak vänder dig':'How fast the right stick turns you','Dödzon':'Dead zone','Hur långt spaken måste föras innan något händer':'How far the stick must move before anything happens','Invertera spak':'Invert stick','Höger spak upp tittar ner':'Right stick up looks down','Vibration':'Vibration','När du skjuter och tar skada':'When you shoot and take damage','Skjut':'Fire','Sikta':'Aim','Hoppa':'Jump','Ducka':'Crouch','Ladda om':'Reload','Byt vapen':'Switch weapon','Granat':'Grenade','Sparka':'Kick','Spring':'Sprint','Inspektera':'Inspect','Upp':'Up','Ner':'Down','Ficklampa':'Flashlight','Ligga ner':'Go prone','V / H':'L / R','Luta':'Lean','Poängtavla':'Scoreboard','Paus':'Pause','Allmänt':'General','Språk':'Language','Synfält':'Field of view','Hur mycket av världen du ser':'How much of the world you see','Kameraskakning':'Camera shake','Vid explosioner, landningar och glidningar':'From explosions, landings and slides','Huvudgungning':'Head bob','Kameran gungar när du går':'The camera bobs when you walk','HUD-storlek':'HUD size','Skadesiffror':'Damage numbers','Siffror som visar hur mycket du träffar för':'Numbers that show how much damage you deal','Skadeindikator':'Damage indicator','Pilar som visar varifrån skotten kommer':'Arrows that show where shots come from','Träffmarkering':'Hit marker','Krysset när du träffar':'The cross when you hit','Notiser':'Notifications','Uppdrag och belöningar under matchen':'Quests and rewards during the match','FPS och ping':'FPS and ping','Bildtakt och fördröjning i hörnet':'Frame rate and latency in the corner','Skärmeffekter':'Screen effects','Röd kant när du tar skada':'Red edge when you take damage','Färgtema':'Colour theme','Accentfärg i menyerna':'Accent colour in the menus','Skymning':'Dusk','Is':'Ice','Gift':'Toxic','Grafit':'Graphite','Hårkors':'Crosshair','Stil':'Style','Kors':'Cross','Kors och punkt':'Cross and dot','Punkt':'Dot','Färg':'Colour','Vit':'White','Grön':'Green','Gul':'Yellow','Rosa':'Pink','Röd':'Red','Längd':'Length','Tjocklek':'Thickness','Mellanrum':'Gap','Synlighet':'Opacity','Kontur':'Outline','Svart kant runt hårkorset':'Black edge around the crosshair','Rörligt hårkors':'Dynamic crosshair','Glider isär när du rör dig och skjuter':'Spreads out when you move and shoot','Återställ standard':'Reset to defaults','Allt sparas direkt':'Everything saves instantly','Klar':'Done','Gå framåt':'Move forward','Gå bakåt':'Move back','Gå vänster':'Move left','Gå höger':'Move right','Ducka / glida':'Crouch / slide','Primärvapen':'Primary weapon','Sekundärvapen':'Secondary weapon','Kasta granat':'Throw grenade','Inspektera vapnet':'Inspect weapon','Luta vänster':'Lean left','Luta höger':'Lean right','Lyfta guldpottan':'Lift the golden pot','Skjutbanan: byt vapen':'Range: switch weapon','Skjutbanan: starta utmaningen':'Range: start challenge','Skjutbanan: nollställ':'Range: reset',
+ 'Inställningar':'Settings','byt kategori':'switch category','nästa val':'next option','Stäng':'Close','Kategorier':'Categories','Grafik':'Graphics','Bild, kvalitet och effekter':'Display, quality and effects','Ljud':'Audio','Volym för allt du hör':'Volume for everything you hear','Kontroller':'Controls','Tangenter, mus och handkontroll':'Keys, mouse and controller','Spel':'Gameplay','Språk, HUD och hårkors':'Language, HUD and crosshair','Bild':'Display','Upplösning':'Resolution','Visningsläge':'Display mode','Fönster':'Windowed','Helskärm':'Fullscreen','Helskärm döljer webbläsarens ramar':'Fullscreen hides the browser frame','Av ger kortare fördröjning men mer arbete för datorn':'Off lowers latency but makes the computer work harder','FPS-gräns':'FPS limit','Högsta antal bilder per sekund':'Maximum frames per second','Obegränsad':'Unlimited','Sänker upplösningen lite när bildtakten faller':'Lowers the resolution a little when the frame rate drops','Kvalitet':'Quality','Grafikkvalitet':'Graphics quality','Anpassad':'Custom','Ställer in alla val nedanför på en gång':'Sets every option below at once','Låg':'Low','Medel':'Medium','Hög':'High','Texturkvalitet':'Texture quality','Skärpa på ytor som syns snett':'Sharpness on surfaces seen at an angle','Skuggkvalitet':'Shadow quality','Upplösning och mjukhet på skuggorna':'Resolution and softness of shadows','Av':'Off','Kantutjämning':'Anti-aliasing','Jämnar ut hackiga kanter':'Smooths jagged edges','Effektkvalitet':'Effects quality','Partiklar, ljuskällor och damm i luften':'Particles, light sources and dust in the air','Siktavstånd':'Render distance','Hur långt bort världen ritas':'How far the world is drawn','Kort':'Short','Långt':'Far','Efterbehandling':'Post-processing','Ljus, färger och djup efter att bilden ritats':'Light, colour and depth after the image is drawn','Starkt ljus glöder':'Bright light glows','Ambient ocklusion':'Ambient occlusion','Mjuka skuggor i hörn och skarvar · Hög och Ultra':'Soft shadows in corners and seams · High and Ultra','Solstrålar':'Sun rays','Ljusstrålar från solen · Hög och Ultra':'Light shafts from the sun · High and Ultra','Skärpedjup i lobbyn':'Lobby depth of field','Bakgrunden blir mjukt suddig · Hög och Ultra':'The background gets softly blurred · High and Ultra','Rörelseoskärpa':'Motion blur','Bilden suddas lite när du vänder dig snabbt':'The image blurs a little when you turn fast','Volym':'Volume','Huvudvolym':'Master volume','Allt ljud i spelet':'All sound in the game','Musik':'Music','Musiken i lobbyn':'Music in the lobby','Ljudeffekter':'Sound effects','Skott, steg, explosioner och menyljud':'Shots, footsteps, explosions and menu sounds','Röstchatt':'Voice chat','Spelet har ingen röstchatt än. Nivån sparas till dess.':'The game has no voice chat yet. The level is saved until then.','Mus':'Mouse','Muskänslighet':'Mouse sensitivity','Hur snabbt du vänder dig':'How fast you turn','Känslighet vid sikte':'Aim sensitivity','Gånger muskänsligheten när du siktar':'Multiplies mouse sensitivity while aiming','Invertera mus':'Invert mouse','Musen upp tittar ner':'Mouse up looks down','Sikta med klick':'Click to aim','Ett klick på höger knapp siktar, ett till släpper':'One right click aims, another releases','Tangenter':'Keys','Klicka på en tangent och tryck sedan på den nya. Esc avbryter. Används tangenten redan byter de två plats.':'Click a key, then press the new one. Esc cancels. If the key is already used, the two swap.','Återställ tangenter':'Reset keys','Handkontroll':'Controller','Status':'Status','Använd handkontroll':'Use controller','Xbox, PlayStation och andra handkontroller':'Xbox, PlayStation and other controllers','Spakkänslighet':'Stick sensitivity','Hur snabbt höger spak vänder dig':'How fast the right stick turns you','Dödzon':'Dead zone','Hur långt spaken måste föras innan något händer':'How far the stick must move before anything happens','Invertera spak':'Invert stick','Höger spak upp tittar ner':'Right stick up looks down','Vibration':'Vibration','När du skjuter och tar skada':'When you shoot and take damage','Skjut':'Fire','Sikta':'Aim','Hoppa':'Jump','Ducka':'Crouch','Ladda om':'Reload','Byt vapen':'Switch weapon','Granat':'Grenade','Sparka':'Kick','Spring':'Sprint','Inspektera':'Inspect','Upp':'Up','Ner':'Down','Ficklampa':'Flashlight','Ligga ner':'Go prone','V / H':'L / R','Luta':'Lean','Poängtavla':'Scoreboard','Paus':'Pause','Allmänt':'General','Språk':'Language','Synfält':'Field of view','Hur mycket av världen du ser':'How much of the world you see','Kameraskakning':'Camera shake','Vid explosioner, landningar och glidningar':'From explosions, landings and slides','Huvudgungning':'Head bob','Speakerröst':'Announcer','En röst som ropar ut rundan när den börjar':'A voice that calls out each round as it starts','Kameran gungar när du går':'The camera bobs when you walk','HUD-storlek':'HUD size','Skadesiffror':'Damage numbers','Siffror som visar hur mycket du träffar för':'Numbers that show how much damage you deal','Skadeindikator':'Damage indicator','Pilar som visar varifrån skotten kommer':'Arrows that show where shots come from','Träffmarkering':'Hit marker','Krysset när du träffar':'The cross when you hit','Notiser':'Notifications','Uppdrag och belöningar under matchen':'Quests and rewards during the match','FPS och ping':'FPS and ping','Bildtakt och fördröjning i hörnet':'Frame rate and latency in the corner','Skärmeffekter':'Screen effects','Röd kant när du tar skada':'Red edge when you take damage','Färgtema':'Colour theme','Accentfärg i menyerna':'Accent colour in the menus','Skymning':'Dusk','Is':'Ice','Gift':'Toxic','Grafit':'Graphite','Hårkors':'Crosshair','Stil':'Style','Kors':'Cross','Kors och punkt':'Cross and dot','Punkt':'Dot','Färg':'Colour','Vit':'White','Grön':'Green','Gul':'Yellow','Rosa':'Pink','Röd':'Red','Längd':'Length','Tjocklek':'Thickness','Mellanrum':'Gap','Synlighet':'Opacity','Kontur':'Outline','Svart kant runt hårkorset':'Black edge around the crosshair','Rörligt hårkors':'Dynamic crosshair','Glider isär när du rör dig och skjuter':'Spreads out when you move and shoot','Återställ standard':'Reset to defaults','Allt sparas direkt':'Everything saves instantly','Klar':'Done','Gå framåt':'Move forward','Gå bakåt':'Move back','Gå vänster':'Move left','Gå höger':'Move right','Ducka / glida':'Crouch / slide','Primärvapen':'Primary weapon','Sekundärvapen':'Secondary weapon','Kasta granat':'Throw grenade','Inspektera vapnet':'Inspect weapon','Luta vänster':'Lean left','Luta höger':'Lean right','Lyfta guldpottan':'Lift the golden pot','Skjutbanan: byt vapen':'Range: switch weapon','Skjutbanan: starta utmaningen':'Range: start challenge','Skjutbanan: nollställ':'Range: reset',
  // version 18: koder
  'Lös in kod':'Redeem code','Koder ger paket och belöningar · varje kod funkar en gång':'Codes give packs and rewards · each code works once','Skriv koden här':'Enter the code here','Lös in':'Redeem',
  // allmänt och HUD
@@ -8186,7 +8292,7 @@ function syncSet(){const on=(id,v)=>{const e=$(id);if(e)e.checked=!!v;},seg=(id,
   on('xolTog',profile.xol!==false);on('xdynTog',profile.xdyn!==false);const xs=$('xhSeg');if(xs)for(const b of xs.children)b.classList.toggle('on',b.dataset.v===(profile.xh||'w'));
   const sg=$('langSeg');if(sg)[...sg.children].forEach(b=>b.classList.toggle('on',b.dataset.l===LANG));syncPad();}
 const SET_DEF={gx:{},rs:1,vsync:true,fpsCap:0,dynres:false,rd:1,bloom:true,ao:true,rays:true,mblur:false,dof:true,flare:true,hfog:true,life:true,vlite:true,wet:true,ngrade:true,fbeam:true,fdust:true,fbounce:true,torchLag:true,vol:.8,sfxv:1,music:.45,vcv:.8,sens:1,adsS:1,invY:false,adsTgl:false,
-  pad:true,padSens:1,padDz:.15,padInv:false,padVib:true,fov:75,camShake:true,bob:true,hud:1,dnum:true,dmgInd:true,hitm:true,notif:true,fpsShow:true,screenFx:true,theme:'sun',chars:'critter',p2p:true,netPred:true,autoQ:true,xh:'w',xs:'cross',xl:8,xt:2,xg:5,xo:1,xol:true,xdyn:true};
+  pad:true,padSens:1,padDz:.15,padInv:false,padVib:true,fov:75,camShake:true,bob:true,announcer:true,hud:1,dnum:true,dmgInd:true,hitm:true,notif:true,fpsShow:true,screenFx:true,theme:'sun',chars:'critter',p2p:true,netPred:true,autoQ:true,xh:'w',xs:'cross',xl:8,xt:2,xg:5,xo:1,xol:true,xdyn:true};
 function setSaved(msg){const m=$('setSaved');if(!m)return;m.textContent=msg;clearTimeout(m._t);m._t=setTimeout(()=>{m.textContent=L('Allt sparas direkt','Everything saves instantly');},2200);}
 function initSettings2(){
   const tog=(id,key,after)=>{const e=$(id);if(e)e.addEventListener('change',()=>{profile[key]=e.checked;saveProfile();if(after)after();syncSet();});};
@@ -8210,7 +8316,7 @@ function initSettings2(){
   $('kbReset').addEventListener('click',()=>{profile.binds={};KBC.id=null;saveProfile();kbBuild();renderKb();setSaved(L('Tangenterna är återställda','Keys restored'));});
   // spel
   rng('fovIn','fovV',v=>Math.round(v)+'°',v=>{profile.fov=v;},null,()=>{if(state==='game'&&!(P.aimK>0)){camera.fov=baseFov();camera.updateProjectionMatrix();}});
-  tog('bobTog','bob');tog('p2pTog','p2p',()=>{if(profile.p2p===false)p2pDetach();else if(MATCH.r)p2pAttach(MATCH.r);});tog('npTog','netPred');tog('aqTog','autoQ',()=>{AUTOQ.done=false;AUTOQ.low=0;});rng('hudIn','hudV',v=>Math.round(v*100)+' %',v=>{profile.hud=v;},null,applyUI);
+  tog('bobTog','bob');tog('annTog','announcer');tog('p2pTog','p2p',()=>{if(profile.p2p===false)p2pDetach();else if(MATCH.r)p2pAttach(MATCH.r);});tog('npTog','netPred');tog('aqTog','autoQ',()=>{AUTOQ.done=false;AUTOQ.low=0;});rng('hudIn','hudV',v=>Math.round(v*100)+' %',v=>{profile.hud=v;},null,applyUI);
   tog('dnTog','dnum');tog('diTog','dmgInd',applyUI);tog('hmTog','hitm',applyUI);tog('ntTog','notif',applyUI);tog('fpTog','fpsShow',applyUI);tog('seTog','screenFx',applyUI);
   seg('thSeg',v=>{profile.theme=v;saveProfile();applyUI();});seg('xsSeg',v=>{profile.xs=v;saveProfile();applyUI();});
   rng('xlIn','xlV',v=>Math.round(v)+' px',v=>{profile.xl=v;},null,applyUI);rng('xtIn','xtV',v=>Math.round(v)+' px',v=>{profile.xt=v;},null,applyUI);
@@ -8434,8 +8540,8 @@ function torchShadowQ(sq){torch.castShadow=sq>=2;torch.shadow.radius=sq>=3?1:2.5
    fungerar som förut. Huvudet sitter på samma höjd som soldatens så att huvudskott stämmer. De klassiska soldaterna finns kvar:
    Inställningar → Spel → Gubbar. */
 const CRIT_COATS=[{f:0xa3491b,b:0xeab386,e:0x8a3a19,i:0x6a3a14}]; // päls, ljus mage, öron, iris (en enda hund)
-const CRC={coat:0xa3491b,coatD:0x7d3315,light:0xe7a875,lightD:0xc77b49,earO:0x8a3a19,earI:0x6b2d18,brow:0x672810,pad:0x3f2b2a,claw:0x2b1e1b,nose:0x141111,
-  mouth:0x5e1c20,tongue:0xe3757f,teeth:0xf4f0e6,lash:0x23120a,gear:0x3c412f,gearD:0x272a21,metal:0xa9aeb2,lens:0x1c4452,white:0xf3f0e8,red:0xd8322a};
+const CRC={coat:0xa3491b,coatD:0x7d3315,light:0xe7a875,lightD:0xc77b49,earO:0x8a3a19,earI:0x6b2d18,brow:0x56200b,pad:0x3f2b2a,claw:0x2b1e1b,nose:0x141111,
+  mouth:0x5e1c20,muz:0xe9b27a,whisk:0x6a3416,nostril:0x050404,tongue:0xe3757f,teeth:0xf4f0e6,lash:0x23120a,gear:0x3c412f,gearD:0x272a21,metal:0xa9aeb2,lens:0x1c4452,white:0xf3f0e8,red:0xd8322a};
 const _crCC={};const crRGB=h=>_crCC[h]||(_crCC[h]=(()=>{const c=new THREE.Color(h).convertSRGBToLinear();return[c.r,c.g,c.b];})());
 const crMix=(a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t],crMul=(a,k)=>[a[0]*k,a[1]*k,a[2]*k];
 const crSS=(a,b,x)=>{const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);};
@@ -8443,13 +8549,13 @@ const crSS=(a,b,x)=>{const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);};
 /* ---- skelettet i vilopose: [namn, förälder, x, y, z]; ögonhålorna är hjälpnoder (inga ben) med egen vridning ---- */
 const CR_RIG=[['pelvis','body',0,.5,0],['spine','pelvis',0,.06,0],['bellyB','spine',0,.17,.12],['chest','spine',0,.38,0],['neck','chest',0,.4,0],
   ['jaw','neck',0,.176,.06],['tongue','jaw',0,-.012,.03],['nose','neck',0,.207,.262],
-  ['sockR','neck',-.07,.276,.095],['sockL','neck',.07,.276,.095],
-  ['lidUR','sockR',0,0,0],['lidDR','sockR',0,0,0],['browR','sockR',0,.064,.01],['lidUL','sockL',0,0,0],['lidDL','sockL',0,0,0],['browL','sockL',0,.064,.01],
+  ['sockR','neck',-.067,.272,.1],['sockL','neck',.067,.272,.1],
+  ['lidUR','sockR',0,0,0],['lidDR','sockR',0,0,0],['browR','sockR',0,.054,.022],['lidUL','sockL',0,0,0],['lidDL','sockL',0,0,0],['browL','sockL',0,.054,.022],
   ['earR0','neck',-.104,.31,-.02],['earR1','earR0',-.045,-.11,.007],['earL0','neck',.104,.31,-.02],['earL1','earL0',.045,-.11,.007],
   ['armR','chest',-.175,.16,.11],['foreR','armR',0,-.2,0],['handR','foreR',0,-.19,0],['armL','chest',.175,.16,.11],['foreL','armL',0,-.2,0],['handL','foreL',0,-.19,0],
   ['thighR','pelvis',-.13,-.03,0],['shinR','thighR',0,-.22,0],['footR','shinR',0,-.19,0],['thighL','pelvis',.13,-.03,0],['shinL','thighL',0,-.22,0],['footL','shinL',0,-.19,0],
   ['tail0','pelvis',0,.03,-.255],['tail1','tail0',0,-.12,0],['tail2','tail1',0,-.11,0],['ant','chest',-.075,.168,-.3]];
-const CR_SOCK={sockR:[-.05,-.24,0],sockL:[-.05,.24,0]},CR_BI={};{let i=0;for(const r of CR_RIG)if(!CR_SOCK[r[0]])CR_BI[r[0]]=i++;}
+const CR_SOCK={sockR:[.05,-.11,0],sockL:[.05,.11,0]},CR_BI={};{let i=0;for(const r of CR_RIG)if(!CR_SOCK[r[0]])CR_BI[r[0]]=i++;}
 function crRig(){const N={body:new THREE.Group()},bones=[];
   for(const [nm,par,x,y,z] of CR_RIG){const o=CR_SOCK[nm]?new THREE.Object3D():new THREE.Bone();o.name=nm;o.position.set(x,y,z);if(CR_SOCK[nm])o.rotation.set(...CR_SOCK[nm]);N[par].add(o);N[nm]=o;if(!CR_SOCK[nm])bones.push(o);}
   for(const k of ['spine','chest','neck'])N[k].rotation.order='YXZ';return{N,bones};}
@@ -8505,19 +8611,23 @@ function crTorsoCol(p,n){const y=p.y,r=crTorsoR(y),f=clamp((p.z-r[0])/Math.max(.
 
 /* ---- huvudet: skalle, panna, kinder och lång nos i ett stycke (z framåt: mitt-y, halva bredden, uppåt, nedåt, exponent) ---- */
 const CR_HEAD=crSpl([[-.128,.262,0,0,0,2,2],[-.115,.262,.06,.058,.052,2,2],[-.085,.264,.1,.097,.085,2,2],[-.045,.266,.122,.117,.1,2,2],[-.005,.266,.128,.12,.104,2.05,2.1],
-  [.035,.256,.127,.112,.1,2.15,2.4],[.07,.241,.12,.093,.083,2.25,2.8],[.1,.228,.106,.077,.06,2.3,3.4],[.135,.22,.092,.067,.052,2.35,3.8],[.17,.214,.08,.061,.046,2.35,3.8],
-  [.205,.211,.068,.056,.043,2.3,3.6],[.235,.209,.057,.05,.041,2.2,3.2],[.258,.208,.045,.042,.036,2.1,2.6],[.272,.208,.026,.024,.021,2,2.2],[.279,.208,0,0,0,2,2]]);
+  [.035,.256,.127,.112,.1,2.15,2.4],[.07,.241,.12,.093,.083,2.25,2.8],[.1,.228,.106,.077,.066,2.3,3.4],[.135,.22,.092,.067,.059,2.35,3.8],[.17,.214,.08,.061,.053,2.35,3.8],
+  [.205,.211,.068,.056,.049,2.3,3.6],[.235,.209,.057,.05,.045,2.2,3.2],[.258,.208,.045,.042,.036,2.1,2.6],[.272,.208,.026,.024,.021,2,2.2],[.279,.208,0,0,0,2,2]]);
 // superellips med egen exponent upptill (nT) och nedtill (nB)
 const crSE2=(a,nT,nB)=>crSE(a,Math.cos(a)>=0?nT:nB);
 function crHeadP(z,a){const r=CR_HEAD(clamp(z,-.128,.279)),e=crSE2(a,r[4],r[5]);return[Math.max(0,r[1])*e[0],r[0]+Math.max(0,e[1]>0?r[2]:r[3])*e[1],z];}
 function crHeadCol(p,n){let c=crRGB(CRC.coat);
   c=crMix(c,crRGB(CRC.coatD),.22*crSS(.08,.2,p.z)*crSS(0,.7,n.y));
-  for(const sx of [-.07,.07]){const d=Math.hypot(p.x-sx,(p.y-.276)*1.1,p.z-.095);c=crMul(c,1-.3*(1-crSS(.044,.084,d)));}
-  if(p.z>.06)c=crMul(c,1-.32*crSS(.014,0,p.y-.168)*crSS(.05,.09,p.z));
+  c=crMix(c,crRGB(CRC.muz),.5*crSS(.11,.215,p.z)*crSS(.236,.2,p.y)*crSS(.3,-.2,n.y));
+  c=crMix(c,crRGB(CRC.muz),.3*crSS(.05,.14,p.z)*crSS(.2,.17,p.y)*crSS(.1,-.6,n.y));
+  for(const sx of [-.067,.067]){const d=Math.hypot(p.x-sx,(p.y-.272)*1.1,p.z-.1);c=crMul(c,1-.16*(1-crSS(.052,.078,d)));}
+  c=crMul(c,1-.12*crSS(.035,.012,Math.abs(p.x))*crSS(.1,.16,p.z)*crSS(.24,.28,p.y));
+  if(p.z>.235)c=crMul(c,1-.45*crSS(.007,.002,Math.abs(p.x))*crSS(.19,.178,p.y)*crSS(.168,.176,p.y));
+  if(p.z>.06)c=crMul(c,1-.42*crSS(.012,0,p.y-.168)*crSS(.05,.09,p.z));
   return crMul(c,1-.24*crSS(-.2,-.75,n.y));}
 // underkäken (gångjärn bakom mungiporna, öppnas med benet 'jaw')
-const CR_JAW=crSpl([[-.02,-.03,0,0,0,2,2],[-.005,-.03,.058,.024,.035,3,2.2],[.03,-.03,.072,.025,.04,4,2.4],[.07,-.029,.064,.023,.038,4,2.5],[.11,-.028,.054,.021,.035,4,2.5],
-  [.15,-.027,.044,.019,.031,3.6,2.4],[.172,-.026,.032,.016,.025,3,2.2],[.186,-.026,.014,.009,.011,2.4,2],[.19,-.026,0,0,0,2,2]]);
+const CR_JAW=crSpl([[-.02,-.03,0,0,0,2,2],[-.005,-.03,.058,.024,.035,3,2.2],[.03,-.03,.075,.025,.034,4,2.4],[.07,-.029,.068,.023,.032,4,2.5],[.11,-.028,.057,.021,.029,4,2.5],
+  [.15,-.027,.047,.019,.026,3.6,2.4],[.172,-.026,.034,.016,.021,3,2.2],[.186,-.026,.014,.009,.011,2.4,2],[.19,-.026,0,0,0,2,2]]);
 function crJawP(z,a){const r=CR_JAW(clamp(z,-.02,.19)),e=crSE2(a,r[4],r[5]);return[Math.max(0,r[1])*e[0],r[0]+Math.max(0,e[1]>0?r[2]:r[3])*e[1],z];}
 // öron: långa, mjuka och lite skålformade; hänger ut från huvudet och ner till käklinjen, två leder (roten och spetsen)
 function crEarP(sd,u,t){const a=u*TAU,s=Math.sin(a),c=Math.cos(a),tip=t>.84?Math.sqrt(Math.max(0,1-((t-.84)/.16)**2)):1;
@@ -8567,12 +8677,13 @@ const crTeamMat=t=>chMat('crT2'+t,()=>{const h=t==='A'?0xff7a12:0x2a9cff;return 
 const crGearMat=()=>chMat('crG2',()=>std({color:C(0xffffff),vertexColors:true,roughness:.55,metalness:.15,envMap:ENV,envMapIntensity:.5,skinning:true}));
 const crGlossMat=()=>chMat('crS2',()=>std({color:C(0xffffff),vertexColors:true,roughness:.16,metalness:0,envMap:ENV,envMapIntensity:1,skinning:true}));
 // ögat: glob med pupill, iris med strålar, mörk ring och vitt (polen pekar framåt)
-const crEyeTx=()=>chTex('crEye2',()=>{const W=64,H=256,c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d'),g=x.createLinearGradient(0,0,0,H);
-  for(const [s,col] of [[0,'#070504'],[.085,'#070504'],[.1,'#2e1407'],[.116,'#b5772f'],[.16,'#8d501c'],[.215,'#5a2b0b'],[.232,'#1d0d05'],[.252,'#1d0d05'],[.27,'#f7f3ee'],[.8,'#eee7df'],[1,'#d3cac2']])g.addColorStop(s,col);
+const crEyeTx=()=>chTex('crEye3',()=>{const W=128,H=512,c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d'),g=x.createLinearGradient(0,0,0,H);
+  for(const [s,col] of [[0,'#040302'],[.098,'#050302'],[.108,'#3a1a06'],[.122,'#e0a24a'],[.15,'#c98a35'],[.19,'#9a5a1d'],[.235,'#6a3510'],[.252,'#2a1307'],[.268,'#140904'],[.278,'#3b2a22'],[.292,'#f8f4ef'],[.75,'#efe8e0'],[1,'#cfc5bc']])g.addColorStop(s,col);
   x.fillStyle=g;x.fillRect(0,0,W,H);
-  for(let i=0;i<80;i++){const u=Math.random()*W;x.strokeStyle=Math.random()<.5?`rgba(255,214,150,${rand(.12,.32).toFixed(2)})`:`rgba(40,18,6,${rand(.12,.3).toFixed(2)})`;x.lineWidth=rand(.6,1.5);x.beginPath();x.moveTo(u,H*.1);x.lineTo(u+rand(-2,2),H*.225);x.stroke();}
+  for(let i=0;i<220;i++){const u=Math.random()*W,l=rand(.03,.13);x.strokeStyle=Math.random()<.55?`rgba(255,${(rand(190,230))|0},140,${rand(.12,.38).toFixed(2)})`:`rgba(45,20,6,${rand(.15,.35).toFixed(2)})`;x.lineWidth=rand(.6,1.6);x.beginPath();const y0=rand(.11,.2);x.moveTo(u,H*y0);x.lineTo(u+rand(-3,3),H*Math.min(.255,y0+l));x.stroke();}
+  for(let i=0;i<28;i++){x.fillStyle=`rgba(255,226,150,${rand(.2,.45).toFixed(2)})`;x.beginPath();x.arc(Math.random()*W,H*rand(.13,.22),rand(.8,2),0,TAU);x.fill();}
   const t=new THREE.CanvasTexture(c);t.encoding=THREE.sRGBEncoding;t.anisotropy=MAXA;return t;});
-const crEyeMat=()=>chMat('crEyeM',()=>std({map:crEyeTx(),roughness:.07,metalness:0,envMap:ENV,envMapIntensity:1.1}));
+const crEyeMat=()=>chMat('crEyeM3',()=>std({map:crEyeTx(),roughness:.05,metalness:0,envMap:ENV,envMapIntensity:1.1}));
 const crHiMat=()=>chMat('crHi2',()=>new THREE.MeshBasicMaterial({color:0xffffff,toneMapped:false}));
 const crEyeG=()=>gch('crEyeG',()=>new THREE.SphereGeometry(1,20,14).rotateX(PI/2)),crS14=()=>gch('crS14',()=>new THREE.SphereGeometry(1,14,10));
 
@@ -8593,8 +8704,8 @@ function crTemplate(){if(CR_T)return CR_T;
   F.push({g:crTube(.31,t=>{const r=.035*(1-.78*t);return[0,r,r,r,2];},.025,.03,10,16,3,3),bone:'tail0',col:(p,n)=>crMul(coat,1-.12*crSS(-.1,-.8,n.z)),
     w:p=>{const d=-p.y,a=crSS(.08,.15,d),b=crSS(.19,.26,d);return[['tail0',1-a],['tail1',a*(1-b)],['tail2',a*b]];}});
   // huvudet, underkäken, munnen och tungan
-  F.push({g:crGrid(34,36,(u,v)=>crHeadP(-.128+.407*(.5-.5*Math.cos(PI*v)),u*TAU+PI),7,4),bone:'neck',col:crHeadCol});
-  F.push({g:crGrid(22,14,(u,v)=>crJawP(-.02+.21*(.5-.5*Math.cos(PI*v)),u*TAU+PI),5,2),bone:'jaw',col:(p,n)=>crMul(crMix(coat,crRGB(CRC.lightD),.35*crSS(.2,-.6,n.y)),1-.35*crSS(-.012,-.002,p.y)*crSS(-.2,.4,n.y))});
+  F.push({g:crGrid(48,48,(u,v)=>crHeadP(-.128+.407*(.5-.5*Math.cos(PI*v)),u*TAU+PI),11,6),bone:'neck',col:crHeadCol});
+  F.push({g:crGrid(22,14,(u,v)=>crJawP(-.02+.21*(.5-.5*Math.cos(PI*v)),u*TAU+PI),5,2),bone:'jaw',col:(p,n)=>crMul(crMix(crMix(coat,crRGB(CRC.lightD),.35*crSS(.2,-.6,n.y)),crRGB(CRC.muz),.22*crSS(.03,.15,p.z)),1-.35*crSS(-.012,-.002,p.y)*crSS(-.2,.4,n.y))});
   F.push({g:S2,m:M(0,.163,.162,0,0,0,.038,.02,.08),bone:'neck',col:CRC.mouth});
   F.push({g:S2,m:M(0,0,.055,0,0,0,.029,.008,.064),bone:'tongue',col:CRC.tongue});
   // öronen: utsidan lite mörkare än pälsen, insidan mörkare, skugga vid roten
@@ -8603,9 +8714,12 @@ function crTemplate(){if(CR_T)return CR_T;
       w:p=>{const t=clamp((.31-p.y)/.27,0,1),b=crSS(.3,.55,t);return[[b0,1-b],[b1,b]];}});}
   // ögonlock (övre med mörk fransrad, undre) och ögonbryn
   const lidU=gch('crLidU',()=>new THREE.SphereGeometry(1,18,9,0,TAU,0,PI*.55)),lidD=gch('crLidD',()=>new THREE.SphereGeometry(1,18,5,0,TAU,PI*.7,PI*.3));
-  const brow=gch('crBrow',()=>{const g=new THREE.SphereGeometry(1,16,8),p=g.attributes.position;for(let i=0;i<p.count;i++){const x=p.getX(i)*.041,y=p.getY(i)*.012,z=p.getZ(i)*.016;p.setXYZ(i,x,y-6*x*x,z);}g.computeVertexNormals();return g;});
-  for(const sd of ['R','L']){F.push({g:lidU,m:M(0,0,0,0,0,0,.0548,.0602,.0492),bone:'lidU'+sd,col:p=>crMix(coat,crRGB(CRC.lash),crSS(.004,-.009,p.y))});
-    F.push({g:lidD,m:M(0,0,0,0,0,0,.0545,.0598,.0488),bone:'lidD'+sd,col:crMul(coat,.92)});F.push({g:brow,bone:'brow'+sd,col:CRC.brow});}
+  const brow=gch('crBrow',()=>{const g=new THREE.SphereGeometry(1,16,8),p=g.attributes.position;for(let i=0;i<p.count;i++){const x=p.getX(i)*.036,y=p.getY(i)*.0125,z=p.getZ(i)*.017;p.setXYZ(i,x,y*(1-.35*Math.abs(x)/.036)-5*x*x,z);}g.computeVertexNormals();return g;});
+  for(const sd of ['R','L']){F.push({g:lidU,m:M(0,0,0,0,0,0,.059,.0668,.053),bone:'lidU'+sd,col:p=>crMix(coat,crRGB(CRC.lash),crSS(.004,-.009,p.y))});
+    F.push({g:lidD,m:M(0,0,0,0,0,0,.0585,.0644,.0524),bone:'lidD'+sd,col:crMul(coat,.92)});F.push({g:brow,bone:'brow'+sd,col:CRC.brow});}
+  {const dot=gch('crDot',()=>new THREE.SphereGeometry(1,6,4));
+   for(const sd of [-1,1])for(const [z,y] of [[.192,.196],[.21,.192],[.186,.185],[.204,.181],[.222,.186]]){let b=null;for(let k=0;k<=90;k++){const q=crHeadP(z,k/90*PI);if(!b||Math.abs(q[1]-y)<Math.abs(b[1]-y))b=q;}
+     F.push({g:dot,m:M(sd*b[0]*.992,b[1],z,0,0,0,.0027,.0027,.0027),bone:'neck',col:CRC.whisk});}}
   // armar och framtassar (tre tår som greppar, en sporre, klor)
   const arm=crTube(.2,t=>{const r=.066-.014*t+.005*Math.sin(PI*t);return[0,r,r*1.03,r,2.1];},.035,.03,14,14,4,3);
   const fore=crTube(.19,t=>{const r=.053-.009*t;return[.004*Math.sin(PI*t),r,r,r*1.06,2.1];},.024,.026,12,12,3,3);
@@ -8627,18 +8741,19 @@ function crTemplate(){if(CR_T)return CR_T;
     F.push({g:S1,m:M(0,-.058,.046,0,0,0,.049,.0075,.042),bone:bf,col:CRC.pad});}
   // nosen (blank, bredast upptill) och två hörntänder som syns när munnen öppnas
   const noseG=gch('crNose',()=>{const g=new THREE.SphereGeometry(1,24,16),p=g.attributes.position;for(let i=0;i<p.count;i++){const y=p.getY(i);p.setX(i,p.getX(i)*(1+.28*y));p.setZ(i,p.getZ(i)*(1-.12*Math.max(0,-y)));}g.computeVertexNormals();return g;});
-  GL.push({g:noseG,m:M(0,.003,.006,-.2,0,0,.036,.026,.028),bone:'nose',col:CRC.nose});
+  GL.push({g:noseG,m:M(0,.003,.006,-.2,0,0,.04,.028,.03),bone:'nose',col:CRC.nose});
+  for(const sx of [-1,1])F.push({g:S2,m:M(sx*.0145,-.004,.031,-.5,sx*.5,sx*.35,.0085,.0048,.006),bone:'nose',col:CRC.nostril});
   const fang=gch('crFang',()=>new THREE.ConeGeometry(.0055,.017,8).rotateX(PI));
   for(const sx of [-1,1])GL.push({g:fang,m:M(sx*.026,.178,.214),bone:'neck',col:CRC.teeth});
   // hjälmen med kant, glasögon på pannan och ett litet ben (märket) på sidorna
   const dome=gch('crDome',()=>new THREE.SphereGeometry(1,22,8,0,TAU,0,PI*.5));
-  TM.push({g:dome,m:M(0,.302,-.012,-.16,0,0,.14,.108,.151),bone:'neck'},{g:torG(.141,.0125,8,40),m:M(0,.302,-.012,PI/2-.16,0,0,1,1.072,1),bone:'neck'});
-  GE.push({g:torG(.136,.0068,6,44),m:M(0,.334,-.012,PI/2-.16,0,0,1,1.075,1),bone:'neck',col:CRC.gearD});
+  TM.push({g:dome,m:M(0,.314,-.012,-.16,0,0,.14,.108,.151),bone:'neck'},{g:torG(.141,.0125,8,40),m:M(0,.314,-.012,PI/2-.16,0,0,1,1.072,1),bone:'neck'});
+  GE.push({g:torG(.136,.0068,6,44),m:M(0,.346,-.012,PI/2-.16,0,0,1,1.075,1),bone:'neck',col:CRC.gearD});
   const gf=gch('crGogF',()=>new THREE.CylinderGeometry(.029,.026,.024,22,1,true).rotateX(PI/2));
-  for(const sx of [-1,1]){GE.push({g:gf,m:M(sx*.04,.352,.112,-.62,0,0),bone:'neck',col:CRC.gearD});GL.push({g:S2,m:M(sx*.04,.358,.121,-.62,0,0,.025,.025,.008),bone:'neck',col:CRC.lens});
-    GE.push({g:rboxGeo(.004,.009,.032,.002),m:M(sx*.139,.322,-.02),bone:'neck',col:CRC.white});
-    for(const [y,z] of [[.0055,.017],[-.0055,.017],[.0055,-.017],[-.0055,-.017]])GE.push({g:S2,m:M(sx*.139,.322+y,-.02+z,0,0,0,.0035,.0065,.0065),bone:'neck',col:CRC.white});}
-  GE.push({g:rboxGeo(.026,.012,.012,.004),m:M(0,.352,.118,-.62,0,0),bone:'neck',col:CRC.gearD});
+  for(const sx of [-1,1]){GE.push({g:gf,m:M(sx*.04,.364,.11,-.62,0,0),bone:'neck',col:CRC.gearD});GL.push({g:S2,m:M(sx*.04,.37,.119,-.62,0,0,.025,.025,.008),bone:'neck',col:CRC.lens});
+    GE.push({g:rboxGeo(.004,.009,.032,.002),m:M(sx*.139,.334,-.02),bone:'neck',col:CRC.white});
+    for(const [y,z] of [[.0055,.017],[-.0055,.017],[.0055,-.017],[-.0055,-.017]])GE.push({g:S2,m:M(sx*.139,.334+y,-.02+z,0,0,0,.0035,.0065,.0065),bone:'neck',col:CRC.white});}
+  GE.push({g:rboxGeo(.026,.012,.012,.004),m:M(0,.364,.116,-.62,0,0),bone:'neck',col:CRC.gearD});
   // scarf i lagets färg: band runt halsen, en trekant över bröstet och en knut i nacken
   const scarf=gch('crScarf',()=>{const s=new THREE.Shape();s.moveTo(-.11,0);s.quadraticCurveTo(0,.02,.11,0);s.quadraticCurveTo(.03,-.06,0,-.14);s.quadraticCurveTo(-.03,-.06,-.11,0);
     const g=new THREE.ExtrudeGeometry(s,{depth:.012,bevelEnabled:true,bevelThickness:.005,bevelSize:.005,bevelSegments:2,curveSegments:12});g.translate(0,0,-.006);
@@ -8667,9 +8782,9 @@ function buildCritter(team,gunMat,opt){opt=opt||{};
     const m=new THREE.SkinnedMesh(geo,mat);m.castShadow=geo!==TT.gloss;m.receiveShadow=true;N.body.add(m);m.bind(sk);meshes.push(m);}
   // ögonen: glob (vrids när hunden tittar), två glansprickar som sitter still
   const eyes=[];for(const sd of ['R','L']){const so=N['sock'+sd],ball=new THREE.Object3D();so.add(ball);
-    const e=new THREE.Mesh(crEyeG(),crEyeMat());e.scale.set(.05,.055,.044);ball.add(e);
-    const h1=new THREE.Mesh(crS14(),crHiMat());h1.position.set(-.015,.022,.039);h1.scale.set(.0105,.011,.005);so.add(h1);
-    const h2=new THREE.Mesh(crS14(),crHiMat());h2.position.set(.013,-.012,.042);h2.scale.set(.0045,.0045,.0025);so.add(h2);eyes.push({ball,sd:sd==='R'?-1:1});}
+    const e=new THREE.Mesh(crEyeG(),crEyeMat());e.scale.set(.054,.0575,.0475);ball.add(e);
+    const h1=new THREE.Mesh(crS14(),crHiMat());h1.position.set(-.014,.013,.046);h1.scale.set(.0085,.009,.004);so.add(h1);
+    const h2=new THREE.Mesh(crS14(),crHiMat());h2.position.set(.012,-.016,.0465);h2.scale.set(.004,.004,.002);so.add(h2);eyes.push({ball,sd:sd==='R'?-1:1});}
   // vapnet (kort kolv), mynningsflamma och skugga under fötterna
   const gunG=new THREE.Group();gunG.rotation.order='YXZ';N.chest.add(gunG);let gun=null;
   const GG=crGunGeo(T);for(const k in GG){const m=new THREE.Mesh(GG[k],k==='g'?(gunMat||EMgun):k==='v'?vcolMat:EMgun);m.castShadow=true;gunG.add(m);if(k==='g'||!gun)gun=m;}
@@ -8782,9 +8897,9 @@ function animCritter(s,o,dt){const A=s.an,R=s.crp,N=R.N,Q=CRIT_CR,PS=R.pers,k=r=
   const nx=alive?clamp(-pitch-(pose+spX+chX)+fl*(o.hh?-.55:.2)+nod+Q.nk*A.crK+A.kick*.5-.32*qs('yawn')-.2*qs('sniff')+.05*Math.sin(qt*15)*qs('sniff')-.3*hitP*(o.hh?1.6:1),-1.35,1.1):(onBack?-.5*e2:.4*e2);
   s.neck.rotation.set(nx,.15*st+(o.look||0)-(sprint?.2:0)+.55*Math.sin(qt*2.2)*qs('look'),-.1*lean+tilt+(!alive?.5*e2*((A.dSide||0)>=0?1:-1):0)+.12*Math.sin(qt*2.2+1)*qs('look'));
   // ansiktet: ögonlock (0 öppet … 1 stängt), undre lock, ögonbryn (höjd och vinkel), käke och tunga
-  let lU=.3+PS.lidOff,lD=.06,bY=0,bA=0,jw=0,tg=0,smug=1;
+  let lU=.15+PS.lidOff*.5,lD=.06,bY=0,bA=0,jw=0,tg=0,smug=1;
   if(sprint){lU=.24;jw=.3;tg=.9;smug=0;}else if(spd>4.6){jw=.16;tg=.45;smug=.5;}
-  if(A.crK>.5){lU=.34;bA=.12;smug=0;}
+  if(A.crK>.5){lU=.24;bA=.12;smug=0;}
   if(A.angry>0){lU=.3;lD=.3;bY=-.006;bA=.42;jw=Math.max(jw,.08);smug=0;}
   {const y1=qs('yawn'),h1=qs('happy'),s1=qs('sniff'),k1=qs('shake'),l1=qs('look');
    lU+=(.95-lU)*y1+(.62-lU)*h1+(.55-lU)*s1+(.75-lU)*k1+(.3-lU)*l1;lD+=(.35-lD)*y1+(.72-lD)*h1;
@@ -8797,8 +8912,8 @@ function animCritter(s,o,dt){const A=s.an,R=s.crp,N=R.N,Q=CRIT_CR,PS=R.pers,k=r=
   const sm=(v,t,r)=>v==null?t:v+(t-v)*k(r);
   A.lU=sm(A.lU,lU,bl?40:14);A.lD=sm(A.lD,lD,12);A.bY=sm(A.bY,bY,12);A.bA=sm(A.bA,bA,12);A.jw=sm(A.jw,jw,jw>(A.jw||0)?18:10);A.tg=sm(A.tg,tg,8);A.sm=sm(A.sm,smug,6);
   for(const E of R.eyes){const own=E.sd===PS.smug,r=E.sd<0?'R':'L';E.ball.rotation.set(-.06+(alive?-pitch*.15:0),A.gz,0);
-    N['lidU'+r].rotation.x=-.95+clamp(A.lU+(own?.1:-.04)*A.sm,0,1)*2.35;N['lidD'+r].rotation.x=-A.lD*.62;
-    const br=N['brow'+r];br.rotation.z=E.sd*(A.bA+(own?-.24:.06)*A.sm);br.position.y=.064+A.bY+(own?0:.008)*A.sm;}
+    N['lidU'+r].rotation.x=-1.0+clamp(A.lU+(own?.06:-.02)*A.sm,0,1)*2.4;N['lidD'+r].rotation.x=-A.lD*.62;
+    const br=N['brow'+r];br.rotation.z=E.sd*(A.bA+(own?-.16:.05)*A.sm);br.position.y=.054+A.bY+(own?0:.006)*A.sm;}
   N.jaw.rotation.x=A.jw*.55;
   N.tongue.position.z=.03+.07*A.tg;N.tongue.rotation.x=(.2+.55*A.tg)*crSS(0,.3,A.tg)+(A.tg>.3&&alive?.14*Math.sin(A.t*16):0);
   N.nose.scale.setScalar(1+.07*Math.sin(qt*31)*qs('sniff')+.04*hitP);
