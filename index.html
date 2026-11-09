@@ -1,6 +1,19 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<html lang="sv"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Doglers – gratis 3D-shooter med taxar i webbläsaren</title>
+<meta name="description" content="Doglers är ett gratis 3D-skjutspel i webbläsaren där du spelar som en tax. Ta guldpottan eller utplåna fiendelaget – spela mot bottar eller med kompisar. Inget att ladda ner.">
+<meta name="keywords" content="Doglers, taxspel, hundspel, shooter, FPS, webbläsarspel, gratis spel, multiplayer, guldpottan">
+<meta name="robots" content="index,follow">
+<link rel="canonical" href="https://doglersgame.github.io/">
+<link rel="icon" type="image/png" href="icon.png"><link rel="apple-touch-icon" href="icon.png">
+<meta name="theme-color" content="#1a0f0a">
+<meta property="og:type" content="website"><meta property="og:site_name" content="Doglers"><meta property="og:url" content="https://doglersgame.github.io/">
+<meta property="og:title" content="Doglers – gratis 3D-shooter med taxar"><meta property="og:description" content="Doglers är ett gratis 3D-skjutspel i webbläsaren där du spelar som en tax. Ta guldpottan eller utplåna fiendelaget – spela mot bottar eller med kompisar. Inget att ladda ner.">
+<meta property="og:image" content="https://doglersgame.github.io/preview.jpg"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Doglers – gratis 3D-shooter med taxar"><meta name="twitter:description" content="Doglers är ett gratis 3D-skjutspel i webbläsaren där du spelar som en tax. Ta guldpottan eller utplåna fiendelaget – spela mot bottar eller med kompisar. Inget att ladda ner."><meta name="twitter:image" content="https://doglersgame.github.io/preview.jpg">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"VideoGame","name":"Doglers","url":"https://doglersgame.github.io/","image":"https://doglersgame.github.io/preview.jpg","description":"Doglers är ett gratis 3D-skjutspel i webbläsaren där du spelar som en tax. Ta guldpottan eller utplåna fiendelaget – spela mot bottar eller med kompisar. Inget att ladda ner.","genre":["Shooter","FPS","Multiplayer"],"gamePlatform":"Web browser","applicationCategory":"Game","operatingSystem":"Any","inLanguage":["sv","en"],"offers":{"@type":"Offer","price":"0","priceCurrency":"SEK"}}</script>
 </head><body>
+<noscript><h1>Doglers</h1><p>Doglers är ett gratis 3D-skjutspel i webbläsaren där du spelar som en tax. Ta guldpottan eller utplåna fiendelaget – spela mot bottar eller med kompisar. Inget att ladda ner.</p></noscript>
 <title>Doglers</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,500;0,600;0,700;0,800;1,700;1,800&family=Barlow:wght@400;500;600;700&display=swap">
@@ -3110,8 +3123,35 @@ function rayBox(o,d,x0,y0,z0,x1,y1,z1){
   }
   return tmin;
 }
+/* ---------- v38: träffytor som sitter fast i hundens skelett ----------
+   Klot per kroppsdel i benens egna koordinater (mätt mot modellen): de följer huvudet, magen och benen i varje pose —
+   stå, ducka, ligga, springa, luta, död — så att det man ser är det man träffar. */
+const HB_CRIT=[
+  // huvud: skalle + hjälm, nos, käke, öron
+  ['neck',0,.235,.05,.2,'head'],['nose',0,-.005,-.015,.095,'head'],['jaw',0,-.025,.07,.08,'head'],['earR1',0,-.03,0,.065,'head'],['earL1',0,-.03,0,.065,'head'],
+  // kropp: bröst, mage, höfter, armar och tassar som håller vapnet
+  ['chest',0,.13,.02,.27,'torso'],['chest',0,.33,.04,.17,'torso'],['pelvis',0,-.06,.08,.25,'torso'],['bellyB',0,0,.06,.3,'torso'],['pelvis',0,.09,0,.29,'torso'],
+  ['armR',0,-.1,0,.095,'torso'],['armL',0,-.1,0,.095,'torso'],['foreR',0,-.1,0,.08,'torso'],['foreL',0,-.1,0,.08,'torso'],['handR',0,-.02,0,.075,'torso'],['handL',0,-.02,0,.075,'torso'],
+  // ben
+  ['thighR',0,-.1,0,.14,'legs'],['thighL',0,-.1,0,.14,'legs'],['shinR',0,-.1,0,.11,'legs'],['shinL',0,-.1,0,.11,'legs'],['footR',0,-.01,.04,.095,'legs'],['footL',0,-.01,.04,.095,'legs']];
+const HB_PAD=1.12,_hbV=new THREE.Vector3(),_hbC=new THREE.Vector3();
+function raySph(o,d,c,r){const ox=o.x-c.x,oy=o.y-c.y,oz=o.z-c.z,b=ox*d.x+oy*d.y+oz*d.z,cc=ox*ox+oy*oy+oz*oz-r*r,disc=b*b-cc;if(disc<0)return -1;const q=Math.sqrt(disc);let t=-b-q;if(t<0)t=-b+q;return t<0?-1:t;}
+function rayCrit(o,d,e){const N=e.crp&&e.crp.N;if(!N||!N.neck)return undefined;
+  // grovt test först: en stor kula runt hela hunden
+  const fy=e.fy||0;_hbC.set(e.x,fy+.9,e.z);if(raySph(o,d,_hbC,1.35)<0)return null;
+  let best=null;
+  for(const [bn,x,y,z,r,part] of HB_CRIT){const B=N[bn];if(!B)continue;const m=B.matrixWorld.elements,sc=Math.hypot(m[0],m[1],m[2])||1;
+    _hbV.set(x,y,z).applyMatrix4(B.matrixWorld);const t=raySph(o,d,_hbV,r*sc*HB_PAD);
+    // huvudet vinner om det ligger nästan lika nära som kroppen (skott genom hakan/nacken räknas som huvudskott)
+    if(t<0)continue;
+    if(!best)best={t,part};
+    else if(part==='head'){if(best.part!=='head'?t<best.t+.05:t<best.t)best={t,part};}
+    else if(best.part==='head'){if(t<best.t-.05)best={t,part};}
+    else if(t<best.t)best={t,part};}
+  return best;}
+
 const PARTS=[['head',1.47,1.84,.15],['torso',.85,1.47,.27],['legs',0,.85,.2]];
-function rayTarget(o,d,e){if(e.kind==='rt')return rayRT(o,d,e);if(e.kind==='board')return rayBoard(o,d,e);let best=null;const s=e.cr?.7:1,fy=e.fy||0;
+function rayTarget(o,d,e){if(e.kind==='rt')return rayRT(o,d,e);if(e.kind==='board')return rayBoard(o,d,e);{const cr=rayCrit(o,d,e);if(cr!==undefined)return cr;}let best=null;const s=e.cr?.7:1,fy=e.fy||0;
   if(e.pr){const fx=-Math.sin(e.yaw),fz=-Math.cos(e.yaw);
     for(const [p,off,y0,y1,h] of [['head',.8,.05,.38,.16],['torso',.15,0,.4,.3],['legs',-.55,0,.3,.28]]){const cx=e.x+fx*off,cz=e.z+fz*off,t=rayBox(o,d,cx-h,fy+y0,cz-h,cx+h,fy+y1,cz+h);if(t>=0&&(!best||t<best.t))best={t,part:p};}
     return best;}
@@ -7709,6 +7749,23 @@ function spectateCam(){
   if(!mates.length){camera.position.set(P.x,P.ys+P.eye+2.5,P.z);camera.rotation.set(-.6,P.yaw,0);return null;}
   const m=mates[spec%mates.length];camera.position.set(m.x,m.eye||1.62,m.z);camera.rotation.set(m.pitch||0,m.yaw,0);return m;
 }
+/* ---------- v38: konstant antal lampor ----------
+   Grafikkortet bygger om ALLA shaders när antalet synliga lampor ändras (t.ex. när vapnet med mynningsljuset göms vid döden).
+   Därför fylls antalet ut med osynliga reservlampor så att det alltid är detsamma — inga omkompileringar, ingen frysning. */
+const LSTAB={pts:[],spots:[],t:0,maxP:-1,maxS:-1,dP:[],dS:[]};
+function lstabVis(o){let p=o,top=o;for(;p;p=p.parent){if(!p.visible)return false;top=p;}return top===scene;}
+function lstab(){
+  if(--LSTAB.t<=0){LSTAB.t=20;LSTAB.pts=[];LSTAB.spots=[];scene.traverse(o=>{if(o.userData.lsDummy)return;if(o.isPointLight)LSTAB.pts.push(o);else if(o.isSpotLight)LSTAB.spots.push(o);});}
+  let cP=0,cS=0;for(const l of LSTAB.pts)if(lstabVis(l))cP++;for(const l of LSTAB.spots)if(lstabVis(l))cS++;
+  if(LSTAB.maxP<0){LSTAB.maxP=cP+2;LSTAB.maxS=cS+1;}if(cP>LSTAB.maxP)LSTAB.maxP=cP;if(cS>LSTAB.maxS)LSTAB.maxS=cS;
+  const fill=(arr,need,mk)=>{while(arr.length<need){const d=mk();d.userData.lsDummy=1;d.intensity=0;d.position.set(0,-900,0);d.castShadow=false;scene.add(d);if(d.target){d.target.position.set(0,-901,0);scene.add(d.target);}arr.push(d);}
+    for(let i=0;i<arr.length;i++)arr[i].visible=i<need;};
+  fill(LSTAB.dP,LSTAB.maxP-cP,()=>new THREE.PointLight(0x000000,0,.01,2));
+  fill(LSTAB.dS,LSTAB.maxS-cS,()=>new THREE.SpotLight(0x000000,0,.01,.1,0,2));}
+{const _rr=renderer.render.bind(renderer),_rc=renderer.compile.bind(renderer);
+  renderer.render=function(sc,cam){if(sc===scene){try{lstab();}catch(e){}}return _rr(sc,cam);};
+  renderer.compile=function(sc,cam){if(sc===scene){try{LSTAB.t=0;lstab();}catch(e){}}return _rc(sc,cam);};}
+
 let last=performance.now(),T=0;
 function loop(now){
   schedFrame(loop);
@@ -7819,7 +7876,7 @@ async function audioProbe(fn,sec){const save=[AC,master,noiseBuf,revS,revL];cons
   AC=off;master=off.createGain();master.gain.value=.5;master.connect(off.destination);noiseBuf=off.createBuffer(1,off.sampleRate*1.5|0,off.sampleRate);{const d=noiseBuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;}revS=revL=null;
   try{fn();const buf=await off.startRendering();let pk=0,ss=0,first=-1;const L=buf.getChannelData(0);for(let i=0;i<L.length;i++){const v=Math.abs(L[i]);if(v>pk)pk=v;ss+=v*v;if(first<0&&v>.01)first=i;}return{peak:+pk.toFixed(3),rms:+Math.sqrt(ss/L.length).toFixed(4),start:+(first/44100).toFixed(3)};}
   finally{[AC,master,noiseBuf,revS,revL]=save;}}
-if(/[?&]ilpdebug/.test(location.search))window.__ilp={enterMatch:(a,b,c)=>enterMatch(a,b,c),leaveMatch:()=>leaveMatch(),audioProbe,wsnd,set locked(v){locked=v;},get dynScale(){return dynScale;},rollSkin,PACKS,SKINS,addMoney,ML,get paused(){return paused;},set paused(v){paused=v;},RIG,CL,VMS,RC,anchors,clipTargets,startReload,cancelReload,switchW,startRack,updateViewModel,updateWeapons,get armL(){return armL;},POTTY_STRAPS,POTTY_BACK,setLang,get LANG(){return LANG;},gunModels,vm,hands,hand2,sfx,BMAT,envTex,goldMat,scene,THREE,loadMap,MAPS,get curMap(){return curMap;},get bots(){return bots;},get rangeT(){return rangeT;},RANGE,BOARD,startChallenge,rangeReset,setRangeMode,setRangeInf,setRangeDist,setRangeDiff,silPart,rayRT,castRay,enemyTargets,updateRange,renderRangeSet,get T(){return T;},collides,los,railCol,RECOIL,get grass(){return grass;},applyAtts,applySkins,OPTM,ATT_SKINS,NOVA,NKIT,KD,novaKits,npSpawn,novaRl,novaFinish,novaInspect,SKFX_S,SKFX_T,normalTex,addRelief,skinTex,renderArsenal,ARS,OPTI,SCOMPAT,optOverlay,aimFovOf,sightOf,openPreview,closePreview,PV,LSHOW,shopOffers,shopLimited,rarDisp,confirm2,slideStart,slideEnd,nv2Chassis,NV2L,NVHC,partMats,kjDraw,COLL,KILLFX,killFx,killFxSkin,killBanner,KFX,WP,kfxUpdate,FLASHT,collFlash,skinTracer,drawEmblem,NSFX,NPS,qEvent,qEnsure,QM,QDAY,QWEEK,QCH,QEVT,SEASON,QBY,renderQuests,claimQ,claimCh,claimEv,claimTier,claimAllTiers,rerollQ,qClaimable,spLvl,onMyKill,hurtBot,switchTab,showEnd,redeemCode,codeHash,packInvOf,givePacks,openPack,renderPacks,handR,hand2,HANDR,HAND2,HPOSE,HFIT2,HFITR,H2Y,HG,FING,placeRig,rigFit,fitHands,poseHands,blendPose,applyHand,poseArr,IMPK,impK,impact,decMesh,decOwn,streaks,TORCH_I,torch,skyMat,INDOOR,get MAPL(){return MAPL;},get LPOOL(){return LPOOL;},pickMapId,renderMapSeg,MATCH,btype,idx,c0,buildSoldier,animSoldier,LOBBY,draw,setupPost,applyShadows,get postQ(){return postQ;},batchStatic,get state(){return state;},renderer,profile,renderShop,GUNS,get W(){return W;},G,P,remotes,NET,PARTY,MATCH,LOB,FR,camera,get isHost(){return isHost;},fire,hurtPlayer,actors,buildCritter,animCritter,charStyle,swapChars,get CRIT_COATS(){return CRIT_COATS;},get CRIT_CR(){return CRIT_CR;},get CRIT2(){return CRIT2;},TORCHU,WETU,torchTick,applyWet,get BEAM(){return BEAM;},get TDUST(){return TDUST;},get tBounce(){return tBounce;},get TL(){return TL;},SPAWN,get P2P(){return P2P;},p2pAttach,p2pDetach,p2pTick,p2pSend,p2pState,effPing,buildPresence,get AUTOQ(){return AUTOQ;},updateRemote,makeRemote,FOGU,applyAtmo,pcssK,get BIRDS(){return BIRDS;},birdsTick,swayMat,openSettings,closeSettings,get SO(){return SO;},gxo,gxSet,postCfg,get GXC(){return GXC;},get composer(){return composer;},get FXK(){return FXK;},kbBuild,get KBA(){return KBA;},get KBM(){return KBM;},padTick,get PAD(){return PAD;},syncSet,setPane,applyUI,applyTexQ,get TQ(){return TQ;},texAni,schedFrame,dmgNum,get DN(){return DN;},baseFov,get musicBus(){return musicBus;},get mainOut(){return mainOut;},sun,torch,get bloomPass(){return bloomPass;},get ssaoPass(){return ssaoPass;},get smaaPass(){return smaaPass;},get fxaaPass(){return fxaaPass;},get gradePass(){return gradePass;},applyPost,shadowsOnly,setLightPool,get isFull(){return isFull;},get keys(){return keys;},qEv:(e,d)=>qEvent(e,d),rollW:P0=>rollSkin(P0),rqW:()=>renderQuests(),get DRN(){return DRN;},droneInspect,droneUpdate,get QDR(){return QDR;},claimDr,claimDrBonus,drTick,gunBoxL,renderQuests,qEvent,COLL,OPT,pistolHouse,get debrisMesh(){return scene.children.find(o=>o.isInstancedMesh&&o.count===900);},applySights,CRK,crkMesh,bhp,cellCenter,breakFx,glassWeb,crackAt,debris,HP,DESTR,smokes,get shake(){return shake;}};
+if(/[?&]ilpdebug/.test(location.search))window.__ilp={enterMatch:(a,b,c)=>enterMatch(a,b,c),leaveMatch:()=>leaveMatch(),hurtPlayer:(...a)=>hurtPlayer(...a),castRay:(...a)=>castRay(...a),rayTarget:(...a)=>rayTarget(...a),audioProbe,wsnd,set locked(v){locked=v;},get dynScale(){return dynScale;},rollSkin,PACKS,SKINS,addMoney,ML,get paused(){return paused;},set paused(v){paused=v;},RIG,CL,VMS,RC,anchors,clipTargets,startReload,cancelReload,switchW,startRack,updateViewModel,updateWeapons,get armL(){return armL;},POTTY_STRAPS,POTTY_BACK,setLang,get LANG(){return LANG;},gunModels,vm,hands,hand2,sfx,BMAT,envTex,goldMat,scene,THREE,loadMap,MAPS,get curMap(){return curMap;},get bots(){return bots;},get rangeT(){return rangeT;},RANGE,BOARD,startChallenge,rangeReset,setRangeMode,setRangeInf,setRangeDist,setRangeDiff,silPart,rayRT,castRay,enemyTargets,updateRange,renderRangeSet,get T(){return T;},collides,los,railCol,RECOIL,get grass(){return grass;},applyAtts,applySkins,OPTM,ATT_SKINS,NOVA,NKIT,KD,novaKits,npSpawn,novaRl,novaFinish,novaInspect,SKFX_S,SKFX_T,normalTex,addRelief,skinTex,renderArsenal,ARS,OPTI,SCOMPAT,optOverlay,aimFovOf,sightOf,openPreview,closePreview,PV,LSHOW,shopOffers,shopLimited,rarDisp,confirm2,slideStart,slideEnd,nv2Chassis,NV2L,NVHC,partMats,kjDraw,COLL,KILLFX,killFx,killFxSkin,killBanner,KFX,WP,kfxUpdate,FLASHT,collFlash,skinTracer,drawEmblem,NSFX,NPS,qEvent,qEnsure,QM,QDAY,QWEEK,QCH,QEVT,SEASON,QBY,renderQuests,claimQ,claimCh,claimEv,claimTier,claimAllTiers,rerollQ,qClaimable,spLvl,onMyKill,hurtBot,switchTab,showEnd,redeemCode,codeHash,packInvOf,givePacks,openPack,renderPacks,handR,hand2,HANDR,HAND2,HPOSE,HFIT2,HFITR,H2Y,HG,FING,placeRig,rigFit,fitHands,poseHands,blendPose,applyHand,poseArr,IMPK,impK,impact,decMesh,decOwn,streaks,TORCH_I,torch,skyMat,INDOOR,get MAPL(){return MAPL;},get LPOOL(){return LPOOL;},pickMapId,renderMapSeg,MATCH,btype,idx,c0,buildSoldier,animSoldier,LOBBY,draw,setupPost,applyShadows,get postQ(){return postQ;},batchStatic,get state(){return state;},renderer,profile,renderShop,GUNS,get W(){return W;},G,P,remotes,NET,PARTY,MATCH,LOB,FR,camera,get isHost(){return isHost;},fire,hurtPlayer,actors,buildCritter,animCritter,charStyle,swapChars,get CRIT_COATS(){return CRIT_COATS;},get CRIT_CR(){return CRIT_CR;},get CRIT2(){return CRIT2;},TORCHU,WETU,torchTick,applyWet,get BEAM(){return BEAM;},get TDUST(){return TDUST;},get tBounce(){return tBounce;},get TL(){return TL;},SPAWN,get P2P(){return P2P;},p2pAttach,p2pDetach,p2pTick,p2pSend,p2pState,effPing,buildPresence,get AUTOQ(){return AUTOQ;},updateRemote,makeRemote,FOGU,applyAtmo,pcssK,get BIRDS(){return BIRDS;},birdsTick,swayMat,openSettings,closeSettings,get SO(){return SO;},gxo,gxSet,postCfg,get GXC(){return GXC;},get composer(){return composer;},get FXK(){return FXK;},kbBuild,get KBA(){return KBA;},get KBM(){return KBM;},padTick,get PAD(){return PAD;},syncSet,setPane,applyUI,applyTexQ,get TQ(){return TQ;},texAni,schedFrame,dmgNum,get DN(){return DN;},baseFov,get musicBus(){return musicBus;},get mainOut(){return mainOut;},sun,torch,get bloomPass(){return bloomPass;},get ssaoPass(){return ssaoPass;},get smaaPass(){return smaaPass;},get fxaaPass(){return fxaaPass;},get gradePass(){return gradePass;},applyPost,shadowsOnly,setLightPool,get isFull(){return isFull;},get keys(){return keys;},qEv:(e,d)=>qEvent(e,d),rollW:P0=>rollSkin(P0),rqW:()=>renderQuests(),get DRN(){return DRN;},droneInspect,droneUpdate,get QDR(){return QDR;},claimDr,claimDrBonus,drTick,gunBoxL,renderQuests,qEvent,COLL,OPT,pistolHouse,get debrisMesh(){return scene.children.find(o=>o.isInstancedMesh&&o.count===900);},applySights,CRK,crkMesh,bhp,cellCenter,breakFx,glassWeb,crackAt,debris,HP,DESTR,smokes,get shake(){return shake;}};
 $('mbTog').addEventListener('change',e=>{profile.mblur=e.target.checked;saveProfile();});
 $('shkTog').addEventListener('change',e=>{profile.camShake=e.target.checked;saveProfile();});
 $('volIn').addEventListener('input',e=>{profile.vol=clamp(+e.target.value,0,1);$('volV').textContent=Math.round(profile.vol*100);applyAudio();rngFill($('volIn'));});$('volIn').addEventListener('change',()=>saveProfile());
