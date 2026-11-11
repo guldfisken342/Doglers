@@ -1205,6 +1205,7 @@ body.noDI #dmgInd,body.noHM #hitm,body.noNT #qPop,body.noFP #perf,body.noSE #vig
           <div class="sRow"><div class="sL"><b>Ambient ocklusion</b><small>Mjuka skuggor i hörn och skarvar · Hög och Ultra</small></div><div class="sC"><label class="sSw"><input type="checkbox" id="aoTog"><i></i></label></div></div>
           <div class="sRow"><div class="sL"><b>Solstrålar</b><small>Ljusstrålar från solen · Hög och Ultra</small></div><div class="sC"><label class="sSw"><input type="checkbox" id="rayTog"><i></i></label></div></div>
           <div class="sRow"><div class="sL"><b>Skärpedjup i lobbyn</b><small>Bakgrunden blir mjukt suddig · Hög och Ultra</small></div><div class="sC"><label class="sSw"><input type="checkbox" id="dofTog"><i></i></label></div></div>
+          <div class="sRow"><div class="sL"><b>Bildskärpa</b><small>Skarpare kanter och detaljer i bilden</small></div><div class="sC"><label class="sSw"><input type="checkbox" id="shpTog"><i></i></label></div></div>
           <div class="sRow"><div class="sL"><b>Rörelseoskärpa</b><small>Bilden suddas lite när du vänder dig snabbt</small></div><div class="sC"><label class="sSw"><input type="checkbox" id="mbTog"><i></i></label></div></div>
           <div class="sRow"><div class="sL"><b>Linsreflexer</b><small>Ljusreflexer i kameran när du tittar mot solen · Hög och Ultra</small></div><div class="sC"><label class="sSw"><input type="checkbox" id="flareTog"><i></i></label></div></div>
           <h3 class="sH">Miljö</h3>
@@ -2076,9 +2077,11 @@ function makeBlockMesh(){
     _m.makeTranslation((i+.5)*CS,(k+.5)*CS,(j+.5)*CS);m.setMatrixAt(c,_m);m.setColorAt(c,_c.setRGB(1,1,1));binst[n]=c;
   }
   for(const t in bMesh){bMesh[t].instanceMatrix.needsUpdate=true;bMesh[t].instanceColor.needsUpdate=true;}
+  LVL_DIRTY=false;LVL_MAP=curMap;
 }
 const cellCenter=n=>{const i=n%GX,j=Math.floor(n/GX)%GZ,k=Math.floor(n/(GX*GZ));return[(i+.5)*CS,(k+.5)*CS,(j+.5)*CS];};
-function hideCell(n){
+var LVL_DIRTY=true,LVL_MAP=null;
+function hideCell(n){LVL_DIRTY=true;
   const t=btype[n];if(!t)return 0;btype[n]=0;const m=bMesh[t];
   if(m&&binst[n]>=0){m.setMatrixAt(binst[n],ZERO);m.instanceMatrix.needsUpdate=true;}
   if(OWNED.has(n)){OWNED.delete(n);decalDrop(n);crackDrop(n);rubble.dropOwner(n);}
@@ -2140,7 +2143,7 @@ function processCollapse(){
         if(Math.random()<.12*pr)smoke(c[0],c[1],c[2],1,.5,2.4,.6,.8,.45);}}}
   if(fell){const s=spatial(fx/fell,fy/fell,fz/fell,40);nz(.7,500,'lowpass',Math.min(1,.25+fell*.01)*Math.max(.15,s.v),90,1,s.pan);}
 }
-function damageBlock(n,dmg){
+function damageBlock(n,dmg){LVL_DIRTY=true;
   const t=btype[n];if(!DESTR[t])return false;
   if(bhp[n]<=dmg){removeBlock(n,4);return true;}
   bhp[n]-=dmg;const ins=binst[n],a=bCol[t];
@@ -3094,8 +3097,11 @@ function updateFire(dt){for(const f of fires){if(f.life<=0)continue;f.life-=dt;i
   if(shockT>0){shockT-=dt;const k=1-shockT/.42;shock.scale.setScalar(.6+k*6.5);shock.material.opacity=(1-k)*.55;if(shockT<=0)shock.visible=false;}}
 // fotdamm och andedräkt i kylan
 const _fxV=new THREE.Vector3();
-function soldierFx(s,x,y,z,spd,dt){const A=s.an,step=Math.floor(A.ph/PI);
-  if(step!==A.step){A.step=step;if(spd>2.4&&MAP.dusty&&Math.random()<.75&&Math.hypot(x-camera.position.x,z-camera.position.z)<40)smoke(x+rand(-.15,.15),y+.04,z+rand(-.15,.15),1,.1,.8,.25,MAP.dusty,.2);}
+const dustG=()=>MAP.dusty||(MAP.snow?.95:MAP.night||MAP.dark?.34:.6),dustA=()=>MAP.dusty?.2:MAP.snow?.16:.1;
+function landDust(x,y,z,k){smoke(x,y+.05,z,Math.round(3+k*3),.16+k*.1,.75,.7+k*.5,dustG(),dustA()*1.1);}
+function soldierFx(s,x,y,z,spd,dt){const A=s.an,step=Math.floor(A.ph/PI),near=Math.hypot(x-camera.position.x,z-camera.position.z)<40;
+  if(step!==A.step){A.step=step;if(spd>2.4&&near&&Math.random()<(MAP.dusty?.75:spd>5?.6:.3))smoke(x+rand(-.15,.15),y+.04,z+rand(-.15,.15),1,.1,.8,.25,dustG(),dustA());}
+  {const lk=A.landK||0;if(lk>(A.fxL||0)+.5&&near&&A.dead===0)landDust(x,y,z,.55);A.fxL=lk;}
   if(MAP.snow&&A.dead===0){A.br=(A.br==null?rand(0,4):A.br)-dt;if(A.br<=0){A.br=rand(2.8,4.4);s.neck.getWorldPosition(_fxV);const yw=s.g.rotation.y;smoke(_fxV.x+Math.sin(yw)*.17,_fxV.y+.1,_fxV.z+Math.cos(yw)*.17,1,.06,1.1,.06,.96,.16);}}}
 
 /* ---------- strålar ---------- */
@@ -3431,6 +3437,14 @@ const sfx={
   cash(){tn(1300,.07,.1,'triangle');setTimeout(()=>tn(1950,.12,.1,'triangle'),60);},
   pick(){tn(660,.1,.15,'triangle');setTimeout(()=>tn(990,.16,.15,'triangle'),90);}
 };
+const _nmA=new THREE.Vector3(),_nmB=new THREE.Vector3();var nmT=0,nmN=0;
+function nearMiss(a,b){if(state!=='game'||!P.alive||!AC)return;const now=performance.now();if(now-nmT<70)return;
+  _nmA.subVectors(b,a);const L2=_nmA.lengthSq();if(L2<16)return;_nmB.subVectors(camera.position,a);const t=_nmB.dot(_nmA)/L2,L=Math.sqrt(L2);
+  if(t*L<2.5||(1-t)*L<1.2)return;   // för nära skytten, eller så tog kulan stopp innan den hann förbi
+  _nmA.multiplyScalar(t).add(a);const d=_nmA.distanceTo(camera.position);if(d>1.7)return;nmT=now;nmN++;const k=1-d/1.7,s=spatial(_nmA.x,_nmA.y,_nmA.z,30);
+  try{nz(.17,rand(2500,3500),'bandpass',.14+.45*k,rand(650,1000),5,s.pan);tn(rand(1500,2100),.07,.03+.05*k,'sine',600,s.pan);}catch(e){}
+  shake=Math.max(shake,.04+.06*k);}
+var HB={k:0,p:0,t:0,n:0};
 function spatial(x,y,z,maxD){
   const dx=x-camera.position.x,dz=z-camera.position.z,d=Math.hypot(dx,y-camera.position.y,dz);
   const rx=Math.cos(P.yaw),rz=-Math.sin(P.yaw);
@@ -5803,7 +5817,7 @@ function startRange(){if(window.dogLoad&&!dogLoad.on&&!startRange.__in){startRan
   lastPhKey='';lastRd=-1;isHost=false;resetStats();P.k=0;P.d=0;P.team='A';NETS.shot=0;NETS.se=null;NETS.hits=[];NETS.ev=[];
   clearRemotes();bots.forEach(b=>scene.remove(b.g));bots=[];loadMap('skjutbana');rangeLoadCfg();initRange();
   state='game';paused=false;hideAll();$('hud').hidden=false;$('rangeHud').hidden=false;hud.feed.textContent='';vm.visible=true;camera.fov=baseFov();camera.updateProjectionMatrix();
-  initAudio();requestLock();setTimeout(()=>feedText('Esc öppnar skjutbanans meny: lägen, avstånd, svårighet och oändlig ammo'),600);}
+  initAudio();if(!(locked&&document.pointerLockElement===cvs))requestLock();setTimeout(()=>feedText('Esc öppnar skjutbanans meny: lägen, avstånd, svårighet och oändlig ammo'),600);}
 
 /* ---------- lobbyn: din soldat på en platta, partyt bredvid, och en scen i bakgrunden ---------- */
 const LOBBY={scene:new THREE.Scene(),cam:new THREE.PerspectiveCamera(38,1,.1,120),slots:[],key:'',t:0,built:false};
@@ -6437,19 +6451,21 @@ function renderShop(){
   }
   renderPacks();renderSights(g.id);renderAtts(g.id);
   if($('pause').hidden)homeSettings();syncSettings();
-  [...$('shadowSeg').children].forEach(btn=>btn.classList.toggle('on',+btn.dataset.q===profile.shadow));$('mbTog').checked=!!profile.mblur;$('shkTog').checked=profile.camShake!==false;$('dynTog').checked=profile.dynres!==false;
+  [...$('shadowSeg').children].forEach(btn=>btn.classList.toggle('on',+btn.dataset.q===profile.shadow));$('mbTog').checked=!!profile.mblur;if($('shpTog'))$('shpTog').checked=profile.sharp!==false;$('shkTog').checked=profile.camShake!==false;$('dynTog').checked=profile.dynres!==false;
 }
 const SQ=[1024,2048,4096,4096];
 /* efterbehandling per grafikprofil: SSAO, bloom, solstrålar, färggradering, kantutjämning, skärpedjup i lobbyn och rörelseoskärpa */
 if(!THREE.SimplexNoise)THREE.SimplexNoise=function(){this.noise3d=()=>Math.random()*2-1;this.noise=()=>Math.random()*2-1;};
 let renderPass=null,composer=null,bloomPass=null,fxaaPass=null,smaaPass=null,ssaoPass=null,bokehPass=null,gradePass=null,postOn=false,postQ=-1;
-const GradeShader={uniforms:{tDiffuse:{value:null},vig:{value:.42},time:{value:0},mb:{value:new THREE.Vector2()},mbOn:{value:0},sunP:{value:new THREE.Vector2(.5,.5)},sunV:{value:0},tint:{value:new THREE.Vector3(1,1,1)},lift:{value:new THREE.Vector3()},ca:{value:1},gOn:{value:1},flr:{value:0},asp:{value:1}},
+const GradeShader={uniforms:{tDiffuse:{value:null},vig:{value:.42},time:{value:0},mb:{value:new THREE.Vector2()},mbOn:{value:0},sunP:{value:new THREE.Vector2(.5,.5)},sunV:{value:0},tint:{value:new THREE.Vector3(1,1,1)},lift:{value:new THREE.Vector3()},ca:{value:1},gOn:{value:1},flr:{value:0},asp:{value:1},hurt:{value:0},shp:{value:0},px:{value:new THREE.Vector2(.001,.001)}},
   vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-  fragmentShader:['uniform sampler2D tDiffuse;uniform float vig,time,mbOn,sunV,ca,gOn,flr,asp;uniform vec2 mb,sunP;uniform vec3 tint,lift;varying vec2 vUv;',
+  fragmentShader:['uniform sampler2D tDiffuse;uniform float vig,time,mbOn,sunV,ca,gOn,flr,asp,shp,hurt;uniform vec2 mb,sunP,px;uniform vec3 tint,lift;varying vec2 vUv;',
     'vec3 toS(vec3 c){return mix(c*12.92,1.055*pow(c,vec3(1./2.4))-.055,step(.0031308,c));}',
     'void main(){if(gOn<.5){gl_FragColor=vec4(clamp(toS(max(texture2D(tDiffuse,vUv).rgb,0.)),0.,1.),1.);return;}vec2 d=vUv-.5;vec3 c;',
     ' if(mbOn>.5){vec2 v=mb*smoothstep(.04,.5,length(d));c=vec3(0.);for(int i=0;i<8;i++){c+=texture2D(tDiffuse,vUv+v*(float(i)/7.-.5)).rgb;}c/=8.;}',
-    ' else{vec2 o=d*.0024*ca;c=vec3(texture2D(tDiffuse,vUv+o).r,texture2D(tDiffuse,vUv).g,texture2D(tDiffuse,vUv-o).b);}',
+    ' else{vec2 o=d*.0024*ca;c=vec3(texture2D(tDiffuse,vUv+o).r,texture2D(tDiffuse,vUv).g,texture2D(tDiffuse,vUv-o).b);',
+    '  if(shp>.001){vec3 n=texture2D(tDiffuse,vUv+vec2(px.x,0.)).rgb+texture2D(tDiffuse,vUv-vec2(px.x,0.)).rgb+texture2D(tDiffuse,vUv+vec2(0.,px.y)).rgb+texture2D(tDiffuse,vUv-vec2(0.,px.y)).rgb;',
+    '   vec3 e=texture2D(tDiffuse,vUv).rgb-n*.25;float l=dot(c,vec3(.3333));c=max(c+clamp(e*shp,-.08,.08)*(1.-smoothstep(.9,1.8,l)),0.);}}',
     ' if(sunV>.001){vec2 st=(sunP-vUv)/18.*.62;vec2 uv=vUv;float dc=1.;vec3 sh=vec3(0.);for(int i=0;i<18;i++){uv+=st;vec3 s=texture2D(tDiffuse,uv).rgb;sh+=max(s-.85,0.)*dc;dc*=.94;}c+=sh*sunV*.085*vec3(1.,.86,.66);}',
     ' if(flr>.001){vec2 asv=vec2(asp,1.);float oc=0.;for(int i=0;i<5;i++){oc+=smoothstep(.9,2.6,dot(texture2D(tDiffuse,sunP+vec2(float(i-2)*.006,0.)).rgb,vec3(.3333)));}float k=flr*oc*.2;',
     '  if(k>.001){vec2 dv=(vUv-sunP)*asv;float dl=length(dv);vec3 f=vec3(1.,.8,.58)*exp(-dl*dl*70.)*.3+vec3(1.,.84,.68)*exp(-abs(dv.y)*240.)*exp(-abs(dv.x)*4.)*.14;vec2 ax=vec2(.5)-sunP;',
@@ -6457,8 +6473,8 @@ const GradeShader={uniforms:{tDiffuse:{value:null},vig:{value:.42},time:{value:0
     '   float rg=length((vUv-(sunP+ax*2.25))*asv);f+=vec3(.55,.85,1.)*smoothstep(.018,0.,abs(rg-.15))*.04;c+=f*k;}}',
     ' c=max(c,0.)*tint;float l=dot(c,vec3(.2126,.7152,.0722));',
     ' c=mix(c,c*vec3(.9,.96,1.13),1.-smoothstep(0.,.24,l));c=mix(c,c*vec3(1.075,.995,.9),smoothstep(.4,1.,l));',
-    ' c=toS(c);l=dot(c,vec3(.299,.587,.114));float sa=max(c.r,max(c.g,c.b))-min(c.r,min(c.g,c.b));c=mix(vec3(l),c,1.1+.3*(1.-sa));c=clamp(c,0.,1.);c=mix(c,c*c*(3.-2.*c),.42);c+=lift*(1.-c);',
-    ' c*=1.-dot(d,d)*vig*1.4;float n=fract(sin(dot(vUv*vec2(12.9898,78.233)+time,vec2(1.,1.)))*43758.5453);c+=(n-.5)*.011;gl_FragColor=vec4(clamp(c,0.,1.),1.);}'].join('\n')};
+    ' c=toS(c);l=dot(c,vec3(.299,.587,.114));float sa=max(c.r,max(c.g,c.b))-min(c.r,min(c.g,c.b));c=mix(vec3(l),c,(1.1+.3*(1.-sa))*(1.-.4*hurt));c=clamp(c,0.,1.);c=mix(c,c*c*(3.-2.*c),.42);c+=lift*(1.-c);',
+    ' c*=1.-dot(d,d)*(vig+hurt*.3)*1.4;float n=fract(sin(dot(vUv*vec2(12.9898,78.233)+time,vec2(1.,1.)))*43758.5453);c+=(n-.5)*.011;gl_FragColor=vec4(clamp(c,0.,1.),1.);}'].join('\n')};
 function disposePost(){if(!composer)return;for(const p of composer.passes){try{if(p.dispose)p.dispose();}catch(e){}}try{composer.renderTarget1.dispose();composer.renderTarget2.dispose();}catch(e){}
   composer=null;renderPass=ssaoPass=bloomPass=fxaaPass=smaaPass=bokehPass=gradePass=null;postKey='';}
 function setupPost(q){const C=postCfg(),key=JSON.stringify(C);if(postKey===key&&(composer||!postNeed(C)))return;disposePost();postKey=key;postQ=q;GXC=C;
@@ -6494,7 +6510,7 @@ const _sp=new THREE.Vector3();let mbYaw=null,mbPitch=0;
 function updateGradeU(isLobby){if(!gradePass)return;const u=gradePass.uniforms;u.time.value=T%60;u.gOn.value=GXC.p>=1?1:0;
   if(isLobby){u.sunV.value=0;u.flr.value=0;u.mbOn.value=0;u.vig.value=.5;u.lift.value.set(0,0,0);return;}u.vig.value=.42;if(MAP&&(MAP.night||MAP.dark))u.lift.value.set(.014,.017,.026);else u.lift.value.set(.004,.004,.005);
   _sp.copy(camera.position).addScaledVector(skyMat.uniforms.sd.value,200).project(camera);
-  const vis=state==='game'&&_sp.z<1?(1-clamp((Math.abs(_sp.x)-.85)/.5,0,1))*(1-clamp((Math.abs(_sp.y)-.85)/.5,0,1)):0,on=GXC.rays?vis:0;u.flr.value+=((GXC.p>=2&&profile.flare!==false&&!MAP.night&&!MAP.dark?vis:0)-u.flr.value)*.15;u.asp.value=camera.aspect;
+  const vis=state==='game'&&_sp.z<1?(1-clamp((Math.abs(_sp.x)-.85)/.5,0,1))*(1-clamp((Math.abs(_sp.y)-.85)/.5,0,1)):0,on=GXC.rays?vis:0;u.flr.value+=((GXC.p>=2&&profile.flare!==false&&!MAP.night&&!MAP.dark?vis:0)-u.flr.value)*.15;u.asp.value=camera.aspect;u.hurt.value=profile.screenFx===false?0:HB.k;u.px.value.set(1/Math.max(1,renderer.domElement.width),1/Math.max(1,renderer.domElement.height));u.shp.value=profile.sharp===false?0:.5;
   u.sunP.value.set(_sp.x*.5+.5,_sp.y*.5+.5);u.sunV.value+=(on*(MAP.shafts==null?1:MAP.shafts)-u.sunV.value)*.12;
   const yw=camera.rotation.y,pt=camera.rotation.x;let on2=0;
   if(profile.mblur&&state==='game'&&mbYaw!=null){const vf=camera.fov*PI/180,hf=2*Math.atan(Math.tan(vf/2)*camera.aspect);let vx=angDiff(yw,mbYaw)/hf*.55,vy=(pt-mbPitch)/vf*.55;const L=Math.hypot(vx,vy);
@@ -6566,7 +6582,7 @@ function updateHUD(){
   setH('nadesEl','GRANATER '+[0,1].map(i=>`<i class="${i<P.nades?'':'used'}"></i>`).join(''));
   hud.cross.style.setProperty('--gap',((profile.xg==null?5:+profile.xg)+(profile.xdyn===false?0:currentSpread()*520))+'px');
   hud.cross.classList.toggle('hide',P.aimK>.6||P.sprint||!P.alive);
-  hud.vign.style.opacity=Math.min(1,dmgFlash+(P.alive&&P.hp<35?.35:0));
+  hud.vign.style.opacity=Math.min(1,dmgFlash+(P.alive&&P.hp<35?.24+.2*HB.p:0));
   hud.dmgInd.style.opacity=Math.max(0,dmgIndT);
   hud.hitm.classList.toggle('on',hitT>0);
   // mål
@@ -6607,7 +6623,8 @@ function enemyTargets(){
   if(G.mode==='train')return bots;
   const out=[];for(const r of remotes.values())if(r.team&&r.team!==P.team)out.push(r);return out;
 }
-const canFight=()=>G.ph==='live'&&P.alive;
+var LIVE_T0=0;const liveAge=()=>(performance.now()-LIVE_T0)/1000,PROT_T=3;
+const canFight=()=>G.ph==='live'&&P.alive&&(G.mode==='range'||liveAge()>=PROT_T);
 function pushHit(t,d,hd){NETS.hits.push({i:++NETS.hi,t,d:Math.round(d),hd:hd?1:0,r:G.rd});if(NETS.hits.length>10)NETS.hits.shift();}
 function pushEv(e){e.i=++NETS.ei;e.r=G.rd;NETS.ev.push(e);if(NETS.ev.length>14)NETS.ev.shift();}
 function hitTarget(e,dmg,head,h){
@@ -6622,7 +6639,7 @@ function fire(){
   const w=W[P.wi];
   // hagelgeväret: avtryckaren avbryter laddningen; tomt i loppet betyder att man pumpar först
   if(P.rl){if(P.rl.loop&&w.ammo>0&&P.rl.ph!=='outr'){const dry=P.rl.empty&&!P.rl.chambered;cancelReload();if(dry){startRack(w);P.latch=true;return;}}else return;}
-  P.protT=0;
+  if(canFight())P.protT=0;
   if(P.reloadT>0||P.fireCD>0||P.switchT>0||P.sprint||P.cyc||!canFight())return;
   if(Math.abs(P.eye-stanceEye())>.25)return;
   if(!w.auto&&P.latch)return;
@@ -6806,7 +6823,7 @@ function botThink(e,dt,t,eyeY,inSpawn,fresh){
   if(e.flinch>0)e.flinch-=dt;
   // ducka: modellen trycks ihop och träffytan blir lägre
   e.crT-=dt;if(e.crT<=0){e.cr=e.alert?Math.random()<.45:Math.random()<.15;e.crT=e.alert?rand(1.2,3):rand(4,9);}
-  if(G.ph!=='live'||!P.alive){e.yaw=e.baseYaw+Math.sin(t*.5+e.phase)*.35;return;}
+  if(G.ph!=='live'||!P.alive||liveAge()<PROT_T){e.yaw=e.baseYaw+Math.sin(t*.5+e.phase)*.35;return;}
   const dx=P.hx-e.x,dz=P.hz-e.z,dist=Math.hypot(dx,dz),toP=Math.atan2(dx,dz),diff=angDiff(toP,e.yaw);
   const ey=e.fy+(e.cr?1.2:1.62);let vis=false;
   if(dist<60&&(Math.abs(diff)<1.25||dist<4||e.alert&&Math.abs(diff)<2.2))vis=los(e.x,ey,e.z,P.hx,eyeY,P.hz)||los(e.x,ey,e.z,P.x,Math.max(P.ys+.2,eyeY-.55),P.z);
@@ -6833,7 +6850,7 @@ function botThink(e,dt,t,eyeY,inSpawn,fresh){
       {const dd=target.clone().sub(gun),L=dd.length();dd.normalize();const g=rayGrid(gun.x,gun.y,gun.z,dd.x,dd.y,dd.z,L,false);if(g&&btype[g.n]===8)damageBlock(g.n,1);}
       if(Math.random()<pHit){tracer(gun,target,0xff8a5c,.08);const head=Math.random()<.1;hurtPlayer(head?60:rand(14,20),e.x,e.z,e.name,e.id,head);if(!P.alive)e.k++;}
       else{const off=new THREE.Vector3(rand(-1,1),rand(-.6,.8),rand(-1,1)).normalize().multiplyScalar(rand(.35,.9));target.add(off);
-        const d=target.clone().sub(gun).normalize();const h=castRay(gun,d,60,null,false);tracer(gun,h.p,0xff8a5c,.08);
+        const d=target.clone().sub(gun).normalize();const h=castRay(gun,d,60,null,false);tracer(gun,h.p,0xff8a5c,.08);nearMiss(gun,h.p);
         if(h.kind)impact(h,d);}
     }
   }else{
@@ -6910,7 +6927,7 @@ function updateRemote(r,pr,peer,dt){
   // skott
   if(typeof pr.s==='number'){if(r.lastShot==null)r.lastShot=pr.s;else if(pr.s>r.lastShot){r.lastShot=pr.s;
     r.fl.visible=true;r.fl.rotation.z=rand(0,6);r.flT=.05;r.shotF=true;const s=spatial(r.x,1.2,r.z,70);wsnd.far((GUNS[pr.wg]||GUNS.k9).snd,Math.max(.12,s.v),s.pan,s.d);
-    if(Array.isArray(pr.se)){const g=new THREE.Vector3();r.fl.getWorldPosition(g);const se=new THREE.Vector3(+pr.se[0],+pr.se[1],+pr.se[2]);tracer(g,se,r.team==='A'?0xffa36a:0x8fd3ff,.07);
+    if(Array.isArray(pr.se)){const g=new THREE.Vector3();r.fl.getWorldPosition(g);const se=new THREE.Vector3(+pr.se[0],+pr.se[1],+pr.se[2]);tracer(g,se,r.team==='A'?0xffa36a:0x8fd3ff,.07);if(r.team!==P.team)nearMiss(g,se);
       const dd=se.clone().sub(g),L=dd.length();if(L>.3){dd.normalize();const h=castRay(g,dd,L+.3,null,false);if(h.kind&&h.t<L+.25)impactFx(h,dd,impK(h),h.kind==='block'?(btype[h.n]===10?false:h.n):-1);}}}}
   // träffar på mig
   if(Array.isArray(pr.h))for(const h of pr.h){if(!h||h.t!==NET.peer||h.r!==G.rd||r.hitSeen.has(h.i))continue;r.hitSeen.add(h.i);
@@ -7008,7 +7025,7 @@ function spawnPlayer(){
 }
 function onRoundStart(){
   QM.rk=0;
-  buildLevel();makeBlockMesh();clearEffects();clearNades();clearDrops();
+  if(LVL_DIRTY||LVL_MAP!==curMap||G.mode==='range'){buildLevel();makeBlockMesh();}clearEffects();clearNades();clearDrops();
   if(G.mode==='train')resetBots();
   for(const r of remotes.values()){r.evSeen.clear();}
   spawnPlayer();
@@ -7057,13 +7074,20 @@ function annLines(){
 function announce(ph){
   if(state!=='game'||G.mode==='range'||!G.mode)return;const now=performance.now();
   if(ph==='prep'){if(now-ANN.last<2500)return;ANN.last=now;const [a,b]=annLines();annHit(true);setTimeout(()=>annSay(a+' '+b),260);}
-  else if(ph==='live'){annRiser();setTimeout(()=>{annHit(false);annSay(LANG==='sv'?'Kör!':'Fight!',{rate:.9});},350);}
+  else if(ph==='live'){setTimeout(()=>{if(G.ph!=='live')return;annRiser();setTimeout(()=>{annHit(false);annSay(LANG==='sv'?'Kör!':'Fight!',{rate:.9});},350);},Math.max(0,PROT_T*1000-650));}
 }
 
+// avgörs rundan just nu? (förutsägelse direkt hos den som dog och den som vann, innan värden hinner skicka resultatet)
+function roundCall(){let mine=P.alive,foes=0,foesUp=0;
+  if(G.mode==='train'){for(const b of bots){foes++;if(b.alive)foesUp++;}}
+  else for(const r of remotes.values()){if(!r.team)continue;if(r.team===P.team){if(r.alive)mine=true;}else{foes++;if(r.alive)foesUp++;}}
+  if(!foes)return null;if(!mine&&foesUp)return 'lose';if(mine&&!foesUp)return 'win';return null;}
+var RC_LAST=null;
 function onPhase(){
   const key=G.rd+':'+G.ph;if(key===lastPhKey)return;const prev=lastPhKey;lastPhKey=key;
-  if(G.ph==='live')P.protT=5;
+  if(G.ph==='live'){LIVE_T0=performance.now();P.protT=PROT_T;}
   if(G.ph==='prep'||(G.ph==='live'&&prev.endsWith(':prep')))announce(G.ph);
+  if(G.ph==='live'){const rc=roundCall();if(rc&&rc!==RC_LAST){RC_LAST=rc;if(rc==='win')sfx.kill();}if(!rc)RC_LAST=null;}
   if(G.ph==='end'){
     const won=G.win===P.team,draw=G.win==='D'||!G.win,ex=!!G.ex&&won;
     let m=won?(ex?700:300):draw?150:100;if(G.ex&&G.ex===myId())m+=400;const got=addMoney(m);sfx.cash();
@@ -7574,7 +7598,7 @@ $('quitBtn').addEventListener('click',e=>{e.stopPropagation();quitGame();});
 const cvs=renderer.domElement;
 function showPause(){paused=true;$('pause').hidden=false;$('pauseNote').hidden=G.mode!=='mp';const sb=$('setBox');if(sb.parentNode!==$('pauseSet'))$('pauseSet').appendChild(sb);syncSettings();if(G.mode==='range')trSave();renderRangeSet();}
 function homeSettings(){const sb=$('setBox'),h=$('soBody')||$('shopSet');if(sb&&sb.parentNode!==h)h.appendChild(sb);}
-function syncSettings(){[...$('shadowSeg').children].forEach(btn=>btn.classList.toggle('on',+btn.dataset.q===profile.shadow));$('mbTog').checked=!!profile.mblur;$('shkTog').checked=profile.camShake!==false;$('dynTog').checked=profile.dynres!==false;
+function syncSettings(){[...$('shadowSeg').children].forEach(btn=>btn.classList.toggle('on',+btn.dataset.q===profile.shadow));$('mbTog').checked=!!profile.mblur;if($('shpTog'))$('shpTog').checked=profile.sharp!==false;$('shkTog').checked=profile.camShake!==false;$('dynTog').checked=profile.dynres!==false;
   $('sensIn').value=profile.sens||1;$('sensV').textContent=(+(profile.sens||1)).toFixed(2);const v=profile.vol==null?.8:profile.vol;$('volIn').value=v;$('volV').textContent=Math.round(v*100);}
 function requestLock(){
   if(noLock)return;
@@ -7684,9 +7708,10 @@ function updatePlayer(dt){
   {const g=groundAt(P.x,P.z,P.y);
    if(P.vy<=0&&g>=P.y-.01){P.y=g;P.vy=0;P.air=false;}
    else{P.vy-=12*dt;let ny=P.y+P.vy*dt;if(P.vy>0&&(collides(P.x,P.z,.28,ny+.15)||ny+1.85>roofAt(P.x,P.z))){P.vy=0;ny=P.y;}
-     if(ny<=g){if(P.vy<-4.2)sfx.step(1.4);if(P.vy<-2.5)P.land=clamp(-P.vy/9,0,1)+.0001;ny=g;P.vy=0;}P.y=ny;P.air=P.y-g>.3;}
+     if(ny<=g){if(P.vy<-4.2){sfx.step(1.4);landDust(P.x,g,P.z,clamp(-P.vy/10,0,1));}if(P.vy<-2.5)P.land=clamp(-P.vy/9,0,1)+.0001;ny=g;P.vy=0;}P.y=ny;P.air=P.y-g>.3;}
    P.ys+=(P.y-P.ys)*Math.min(1,dt*(Math.abs(P.y-P.ys)>.6?30:14));}
   const sp=Math.hypot(P.vx,P.vz);P.bob+=sp*dt*2.1;
+  if(P.sl>0&&!P.air&&sp>3&&(P.slDu=(P.slDu||0)-dt)<=0){P.slDu=.06;smoke(P.x+P.vx*.1+rand(-.2,.2),P.y+.06,P.z+P.vz*.1+rand(-.2,.2),1,.14,.7,.35,dustG(),dustA()*1.2);}
   const si=Math.floor(P.bob/PI);if(si!==P.stepI){P.stepI=si;if(sp>1&&!(P.sl>0)){sfx.step(P.prone||P.crouch?.3:P.sprint?1.2:.7);if(G.mode==='train'&&G.ph==='live')alertBots(P.sprint?7:P.crouch?0:3.2,P.x,P.z);}}
   P.eye+=(stanceEye()-P.eye)*Math.min(1,dt*(P.sl>0?17:P.prone||P.eye<.9?4:10));
   // siktet: varje vapen har sin egen tid upp i siktet, rörelsen följer en mjuk kurva så att siktet landar stilla
@@ -7798,12 +7823,17 @@ function loop(now){
   updateTracers(dt);updateImpacts(dt);kfxUpdate(dt);droneUpdate(dt);birdsTick(dt);torchTick(dt);
   boomLight.intensity*=Math.exp(-8*dt);
   dmgFlash=Math.max(0,dmgFlash-dt*1.4);dmgIndT=Math.max(0,dmgIndT-dt*1.2);hitT-=dt;shake*=Math.exp(-6*dt);
+  {const low=state==='game'&&P.alive&&G.ph==='live'&&P.hp<35?1-.5*Math.max(0,P.hp)/35:0;HB.k+=(low-HB.k)*Math.min(1,dt*3);HB.p=Math.max(0,HB.p-dt*2.2);
+   if(low>0){HB.t-=dt;if(HB.t<=0){HB.t=.6+.55*Math.max(0,P.hp)/35;HB.p=1;HB.n++;try{tn(60,.13,.34*low,'sine',38);setTimeout(()=>{try{tn(52,.15,.24*low,'sine',34);}catch(e){}},150);}catch(e){}}}else HB.t=0;}
   // banderoll
   let bn=null,bt='',bc='';
   if(G.ph==='pick'){}
   else if(G.ph==='wait'){bn='…';bt=G.mode==='mp'?'VÄNTAR PÅ ALLA SPELARE':'GÖR DIG REDO';}
   else if(G.ph==='prep'){bn=String(Math.max(1,Math.ceil(G.tl)));bt='RUNDA '+G.rd+' · DU ÄR LAG '+TEAMNAME[P.team].toUpperCase();bc=P.team;}
   else if(G.ph==='end'||G.ph==='over'){const won=G.win===P.team,draw=G.win==='D'||!G.win;bn=draw?'OAVGJORT':won?'VUNNEN':'FÖRLORAD';bt=G.why;bc=draw?'':won?P.team:'lose';}
+  else if(G.ph==='live'&&G.mode!=='range'&&liveAge()<PROT_T){bn=String(Math.max(1,Math.ceil(PROT_T-liveAge())));bt='ALLA ÄR SKYDDADE · INGEN KAN SKJUTA ÄN';bc=P.team;}
+  else if(G.ph==='live'&&G.mode!=='range'&&roundCall()==='lose'){bn='FÖRLORAD';bt='DITT LAG ÄR UTE';bc='lose';}
+  else if(G.ph==='live'&&G.mode!=='range'&&roundCall()==='win'){bn='VUNNEN';bt='ALLA FIENDER ÄR UTE';bc=P.team;}
   else if(!P.alive){bn='UTE';bc='lose';}
   if(G.mode==='range'){const rb=rangeBanner();if(rb){bn=rb[0];bt=rb[1];bc=rb[2];}}
   hud.big.hidden=bn==null;if(bn!=null){hud.bigNum.textContent=bn;hud.bigNum.className=bc;hud.bigTxt.textContent=bt||'';hud.bigTxt.hidden=!bt;}
@@ -7814,7 +7844,8 @@ function loop(now){
     const sh=profile.camShake===false?0:(shake+(P.slK||0)*.2*(P.slS?Math.min(1,P.slS.v/9):0))*.1,sx=(Math.sin(T*41.3)*.6+Math.sin(T*67.1+1.3)*.4)*sh,sy=(Math.sin(T*37.7+.7)*.6+Math.sin(T*59.3+2.1)*.4)*sh,sz=Math.sin(T*43.9+2.4)*sh*.6;
     P.land=Math.max(0,(P.land||0)-dt*3.2);const dip=Math.sin(Math.min(1,P.land)*PI)*.07;
     camera.position.set(P.hx+sx,P.ys+P.eye-Math.abs(P.lean)*.05+bobY+sy-dip,P.hz+sz);
-    camera.rotation.set(clamp(P.pitch+(P.recP||0),-1.5,1.5)+P.kick+sy*.4,P.yaw+(P.recY||0)+sx*.3,-P.lean*.2+bk*Math.sin(P.bob)*.004*Math.min(1,sp/4)+sx*.6+(P.roll||0));
+    {const lat=P.vx*Math.cos(P.yaw)-P.vz*Math.sin(P.yaw),tg=bk*clamp(lat/6,-1,1)*.016*(1-P.aimK*.6);P.stl=(P.stl||0)+(tg-(P.stl||0))*Math.min(1,dt*7);}
+    camera.rotation.set(clamp(P.pitch+(P.recP||0),-1.5,1.5)+P.kick+sy*.4,P.yaw+(P.recY||0)+sx*.3,-P.lean*.2+bk*Math.sin(P.bob)*.004*Math.min(1,sp/4)+sx*.6+(P.roll||0)-(P.stl||0));
     vm.visible=true;updateViewModel(dt,sp);
   }else{vm.visible=false;hud.scope.hidden=true;const m=spectateCam();if(m&&G.ph==='live'){hud.bigTxt.hidden=false;hud.bigTxt.textContent='TITTAR PÅ '+m.name.toUpperCase()+' · MELLANSLAG BYTER';}}
   sky.position.copy(camera.position);
@@ -7876,8 +7907,9 @@ async function audioProbe(fn,sec){const save=[AC,master,noiseBuf,revS,revL];cons
   AC=off;master=off.createGain();master.gain.value=.5;master.connect(off.destination);noiseBuf=off.createBuffer(1,off.sampleRate*1.5|0,off.sampleRate);{const d=noiseBuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;}revS=revL=null;
   try{fn();const buf=await off.startRendering();let pk=0,ss=0,first=-1;const L=buf.getChannelData(0);for(let i=0;i<L.length;i++){const v=Math.abs(L[i]);if(v>pk)pk=v;ss+=v*v;if(first<0&&v>.01)first=i;}return{peak:+pk.toFixed(3),rms:+Math.sqrt(ss/L.length).toFixed(4),start:+(first/44100).toFixed(3)};}
   finally{[AC,master,noiseBuf,revS,revL]=save;}}
-if(/[?&]ilpdebug/.test(location.search))window.__ilp={enterMatch:(a,b,c)=>enterMatch(a,b,c),leaveMatch:()=>leaveMatch(),hurtPlayer:(...a)=>hurtPlayer(...a),castRay:(...a)=>castRay(...a),rayTarget:(...a)=>rayTarget(...a),audioProbe,wsnd,set locked(v){locked=v;},get dynScale(){return dynScale;},rollSkin,PACKS,SKINS,addMoney,ML,get paused(){return paused;},set paused(v){paused=v;},RIG,CL,VMS,RC,anchors,clipTargets,startReload,cancelReload,switchW,startRack,updateViewModel,updateWeapons,get armL(){return armL;},POTTY_STRAPS,POTTY_BACK,setLang,get LANG(){return LANG;},gunModels,vm,hands,hand2,sfx,BMAT,envTex,goldMat,scene,THREE,loadMap,MAPS,get curMap(){return curMap;},get bots(){return bots;},get rangeT(){return rangeT;},RANGE,BOARD,startChallenge,rangeReset,setRangeMode,setRangeInf,setRangeDist,setRangeDiff,silPart,rayRT,castRay,enemyTargets,updateRange,renderRangeSet,get T(){return T;},collides,los,railCol,RECOIL,get grass(){return grass;},applyAtts,applySkins,OPTM,ATT_SKINS,NOVA,NKIT,KD,novaKits,npSpawn,novaRl,novaFinish,novaInspect,SKFX_S,SKFX_T,normalTex,addRelief,skinTex,renderArsenal,ARS,OPTI,SCOMPAT,optOverlay,aimFovOf,sightOf,openPreview,closePreview,PV,LSHOW,shopOffers,shopLimited,rarDisp,confirm2,slideStart,slideEnd,nv2Chassis,NV2L,NVHC,partMats,kjDraw,COLL,KILLFX,killFx,killFxSkin,killBanner,KFX,WP,kfxUpdate,FLASHT,collFlash,skinTracer,drawEmblem,NSFX,NPS,qEvent,qEnsure,QM,QDAY,QWEEK,QCH,QEVT,SEASON,QBY,renderQuests,claimQ,claimCh,claimEv,claimTier,claimAllTiers,rerollQ,qClaimable,spLvl,onMyKill,hurtBot,switchTab,showEnd,redeemCode,codeHash,packInvOf,givePacks,openPack,renderPacks,handR,hand2,HANDR,HAND2,HPOSE,HFIT2,HFITR,H2Y,HG,FING,placeRig,rigFit,fitHands,poseHands,blendPose,applyHand,poseArr,IMPK,impK,impact,decMesh,decOwn,streaks,TORCH_I,torch,skyMat,INDOOR,get MAPL(){return MAPL;},get LPOOL(){return LPOOL;},pickMapId,renderMapSeg,MATCH,btype,idx,c0,buildSoldier,animSoldier,LOBBY,draw,setupPost,applyShadows,get postQ(){return postQ;},batchStatic,get state(){return state;},renderer,profile,renderShop,GUNS,get W(){return W;},G,P,remotes,NET,PARTY,MATCH,LOB,FR,camera,get isHost(){return isHost;},fire,hurtPlayer,actors,buildCritter,animCritter,charStyle,swapChars,get CRIT_COATS(){return CRIT_COATS;},get CRIT_CR(){return CRIT_CR;},get CRIT2(){return CRIT2;},TORCHU,WETU,torchTick,applyWet,get BEAM(){return BEAM;},get TDUST(){return TDUST;},get tBounce(){return tBounce;},get TL(){return TL;},SPAWN,get P2P(){return P2P;},p2pAttach,p2pDetach,p2pTick,p2pSend,p2pState,effPing,buildPresence,get AUTOQ(){return AUTOQ;},updateRemote,makeRemote,FOGU,applyAtmo,pcssK,get BIRDS(){return BIRDS;},birdsTick,swayMat,openSettings,closeSettings,get SO(){return SO;},gxo,gxSet,postCfg,get GXC(){return GXC;},get composer(){return composer;},get FXK(){return FXK;},kbBuild,get KBA(){return KBA;},get KBM(){return KBM;},padTick,get PAD(){return PAD;},syncSet,setPane,applyUI,applyTexQ,get TQ(){return TQ;},texAni,schedFrame,dmgNum,get DN(){return DN;},baseFov,get musicBus(){return musicBus;},get mainOut(){return mainOut;},sun,torch,get bloomPass(){return bloomPass;},get ssaoPass(){return ssaoPass;},get smaaPass(){return smaaPass;},get fxaaPass(){return fxaaPass;},get gradePass(){return gradePass;},applyPost,shadowsOnly,setLightPool,get isFull(){return isFull;},get keys(){return keys;},qEv:(e,d)=>qEvent(e,d),rollW:P0=>rollSkin(P0),rqW:()=>renderQuests(),get DRN(){return DRN;},droneInspect,droneUpdate,get QDR(){return QDR;},claimDr,claimDrBonus,drTick,gunBoxL,renderQuests,qEvent,COLL,OPT,pistolHouse,get debrisMesh(){return scene.children.find(o=>o.isInstancedMesh&&o.count===900);},applySights,CRK,crkMesh,bhp,cellCenter,breakFx,glassWeb,crackAt,debris,HP,DESTR,smokes,get shake(){return shake;}};
+if(/[?&]ilpdebug/.test(location.search))window.__ilp={get HB(){return HB;},landDust:(...a)=>landDust(...a),soldierFx:(...a)=>soldierFx(...a),nearMiss:(...a)=>nearMiss(...a),get nmN(){return nmN;},get MAPo(){return MAP;},enterMatch:(a,b,c)=>enterMatch(a,b,c),leaveMatch:()=>leaveMatch(),hurtPlayer:(...a)=>hurtPlayer(...a),buildLevel:()=>buildLevel(),makeBlockMesh:()=>makeBlockMesh(),onRoundStart:()=>onRoundStart(),resetBots:()=>resetBots(),get bMesh(){return bMesh;},get stats(){return stats;},spawnPlayer:()=>spawnPlayer(),clearEffects:()=>clearEffects(),castRay:(...a)=>castRay(...a),rayTarget:(...a)=>rayTarget(...a),audioProbe,wsnd,set locked(v){locked=v;},get dynScale(){return dynScale;},rollSkin,PACKS,SKINS,addMoney,ML,get paused(){return paused;},set paused(v){paused=v;},RIG,CL,VMS,RC,anchors,clipTargets,startReload,cancelReload,switchW,startRack,updateViewModel,updateWeapons,get armL(){return armL;},POTTY_STRAPS,POTTY_BACK,setLang,get LANG(){return LANG;},gunModels,vm,hands,hand2,sfx,BMAT,envTex,goldMat,scene,THREE,loadMap,MAPS,get curMap(){return curMap;},get bots(){return bots;},get rangeT(){return rangeT;},RANGE,BOARD,startChallenge,rangeReset,setRangeMode,setRangeInf,setRangeDist,setRangeDiff,silPart,rayRT,castRay,enemyTargets,updateRange,renderRangeSet,get T(){return T;},collides,los,railCol,RECOIL,get grass(){return grass;},applyAtts,applySkins,OPTM,ATT_SKINS,NOVA,NKIT,KD,novaKits,npSpawn,novaRl,novaFinish,novaInspect,SKFX_S,SKFX_T,normalTex,addRelief,skinTex,renderArsenal,ARS,OPTI,SCOMPAT,optOverlay,aimFovOf,sightOf,openPreview,closePreview,PV,LSHOW,shopOffers,shopLimited,rarDisp,confirm2,slideStart,slideEnd,nv2Chassis,NV2L,NVHC,partMats,kjDraw,COLL,KILLFX,killFx,killFxSkin,killBanner,KFX,WP,kfxUpdate,FLASHT,collFlash,skinTracer,drawEmblem,NSFX,NPS,qEvent,qEnsure,QM,QDAY,QWEEK,QCH,QEVT,SEASON,QBY,renderQuests,claimQ,claimCh,claimEv,claimTier,claimAllTiers,rerollQ,qClaimable,spLvl,onMyKill,hurtBot,switchTab,showEnd,redeemCode,codeHash,packInvOf,givePacks,openPack,renderPacks,handR,hand2,HANDR,HAND2,HPOSE,HFIT2,HFITR,H2Y,HG,FING,placeRig,rigFit,fitHands,poseHands,blendPose,applyHand,poseArr,IMPK,impK,impact,decMesh,decOwn,streaks,TORCH_I,torch,skyMat,INDOOR,get MAPL(){return MAPL;},get LPOOL(){return LPOOL;},pickMapId,renderMapSeg,MATCH,btype,idx,c0,buildSoldier,animSoldier,LOBBY,draw,setupPost,applyShadows,get postQ(){return postQ;},batchStatic,get state(){return state;},renderer,profile,renderShop,GUNS,get W(){return W;},G,P,remotes,NET,PARTY,MATCH,LOB,FR,camera,get isHost(){return isHost;},fire,hurtPlayer,actors,buildCritter,animCritter,charStyle,swapChars,get CRIT_COATS(){return CRIT_COATS;},get CRIT_CR(){return CRIT_CR;},get CRIT2(){return CRIT2;},TORCHU,WETU,torchTick,applyWet,get BEAM(){return BEAM;},get TDUST(){return TDUST;},get tBounce(){return tBounce;},get TL(){return TL;},SPAWN,get P2P(){return P2P;},p2pAttach,p2pDetach,p2pTick,p2pSend,p2pState,effPing,buildPresence,get AUTOQ(){return AUTOQ;},updateRemote,makeRemote,FOGU,applyAtmo,pcssK,get BIRDS(){return BIRDS;},birdsTick,swayMat,openSettings,closeSettings,get SO(){return SO;},gxo,gxSet,postCfg,get GXC(){return GXC;},get composer(){return composer;},get FXK(){return FXK;},kbBuild,get KBA(){return KBA;},get KBM(){return KBM;},padTick,get PAD(){return PAD;},syncSet,setPane,applyUI,applyTexQ,get TQ(){return TQ;},texAni,schedFrame,dmgNum,get DN(){return DN;},baseFov,get musicBus(){return musicBus;},get mainOut(){return mainOut;},sun,torch,get bloomPass(){return bloomPass;},get ssaoPass(){return ssaoPass;},get smaaPass(){return smaaPass;},get fxaaPass(){return fxaaPass;},get gradePass(){return gradePass;},applyPost,shadowsOnly,setLightPool,get isFull(){return isFull;},get keys(){return keys;},qEv:(e,d)=>qEvent(e,d),rollW:P0=>rollSkin(P0),rqW:()=>renderQuests(),get DRN(){return DRN;},droneInspect,droneUpdate,get QDR(){return QDR;},claimDr,claimDrBonus,drTick,gunBoxL,renderQuests,qEvent,COLL,OPT,pistolHouse,get debrisMesh(){return scene.children.find(o=>o.isInstancedMesh&&o.count===900);},applySights,CRK,crkMesh,bhp,cellCenter,breakFx,glassWeb,crackAt,debris,HP,DESTR,smokes,get shake(){return shake;}};
 $('mbTog').addEventListener('change',e=>{profile.mblur=e.target.checked;saveProfile();});
+$('shpTog').addEventListener('change',e=>{profile.sharp=e.target.checked;saveProfile();});
 $('shkTog').addEventListener('change',e=>{profile.camShake=e.target.checked;saveProfile();});
 $('volIn').addEventListener('input',e=>{profile.vol=clamp(+e.target.value,0,1);$('volV').textContent=Math.round(profile.vol*100);applyAudio();rngFill($('volIn'));});$('volIn').addEventListener('change',()=>saveProfile());
 $('sensIn').addEventListener('input',e=>{profile.sens=clamp(+e.target.value||1,.3,3);$('sensV').textContent=profile.sens.toFixed(2);rngFill($('sensIn'));});$('sensIn').addEventListener('change',()=>saveProfile());
@@ -7900,12 +7932,12 @@ const EN={
  'Våta ytor':'Wet surfaces','Pölar och blanka, fuktiga golv på Slottet och i Hamnen':'Puddles and glossy damp floors at the Castle and the Harbour','Ficklampa':'Flashlight','Nattfärg':'Night colour','I svagt ljus drar färgerna åt kallt blått som i månsken, facklor och ficklampa behåller sin värme · Slottet':'In dim light colours shift towards cool moonlit blue, torches and the flashlight keep their warmth · the Castle','Ljuskägla i luften':'Light beam in the air','Strålen syns i dammig luft och mörker · Effektkvalitet Medel och Hög':'The beam shows in dusty air and darkness · Effects quality Medium and High','Damm i ljuset':'Dust in the light','Små korn som glittrar när de hamnar i strålen':'Tiny specks that glitter when they drift into the beam','Studsljus':'Bounce light','Ytan du lyser på sprider ljuset vidare ut i rummet':'The surface you light up spreads the light into the room','Mjuk följning':'Smooth follow','Ljuset släpar en aning efter när du vänder dig, som en riktig lampa i handen':'The light trails slightly when you turn, like a real hand-held light','Upplösning och mjukhet på skuggorna · ficklampan kastar skuggor från Medel · Ultra: mjuka kontaktskuggor':'Resolution and softness of shadows · the flashlight casts shadows from Medium · Ultra: soft contact shadows',
  'Nätverk':'Network','Direktkontakt mellan spelare':'Direct connection between players','Skickar positioner och skott direkt mellan datorerna. Lägre ping, servern tar över om det inte går':'Sends positions and shots straight between the computers. Lower ping, the server takes over if it does not work','Förutse rörelser':'Predict movement','Visar andra spelare där de är nu i stället för där de var för en ping sedan':'Shows other players where they are now instead of where they were one ping ago','Sänk grafiken vid låg FPS':'Lower graphics at low FPS','Om spelet går trögt i flera sekunder sänks grafikkvaliteten ett steg':'If the game runs slowly for several seconds, graphics quality drops one step',
  'Linsreflexer':'Lens flares','Ljusreflexer i kameran när du tittar mot solen · Hög och Ultra':'Light reflections in the lens when you look at the sun · High and Ultra','Miljö':'Environment','Höjddimma':'Height fog','Ljuskäglor från lampor':'Light cones from lamps','Synliga strålar och sken runt lampor i mörker och skymning':'Visible beams and glow around lamps in the dark and at dusk','Dis som ligger tätt vid marken och lyser mot solen':'Haze that hugs the ground and glows towards the sun','Fåglar på himlen':'Birds in the sky','Flockar som flyger över kartan · Effektkvalitet Medel och Hög':'Flocks flying over the map · Effects quality Medium and High','Upplösning och mjukhet på skuggorna · Ultra: mjuka kontaktskuggor':'Resolution and softness of shadows · Ultra: soft contact shadows',
- 'Inställningar':'Settings','byt kategori':'switch category','nästa val':'next option','Stäng':'Close','Kategorier':'Categories','Grafik':'Graphics','Bild, kvalitet och effekter':'Display, quality and effects','Ljud':'Audio','Volym för allt du hör':'Volume for everything you hear','Kontroller':'Controls','Tangenter, mus och handkontroll':'Keys, mouse and controller','Spel':'Gameplay','Språk, HUD och hårkors':'Language, HUD and crosshair','Bild':'Display','Upplösning':'Resolution','Visningsläge':'Display mode','Fönster':'Windowed','Helskärm':'Fullscreen','Helskärm döljer webbläsarens ramar':'Fullscreen hides the browser frame','Av ger kortare fördröjning men mer arbete för datorn':'Off lowers latency but makes the computer work harder','FPS-gräns':'FPS limit','Högsta antal bilder per sekund':'Maximum frames per second','Obegränsad':'Unlimited','Sänker upplösningen lite när bildtakten faller':'Lowers the resolution a little when the frame rate drops','Kvalitet':'Quality','Grafikkvalitet':'Graphics quality','Anpassad':'Custom','Ställer in alla val nedanför på en gång':'Sets every option below at once','Låg':'Low','Medel':'Medium','Hög':'High','Texturkvalitet':'Texture quality','Skärpa på ytor som syns snett':'Sharpness on surfaces seen at an angle','Skuggkvalitet':'Shadow quality','Upplösning och mjukhet på skuggorna':'Resolution and softness of shadows','Av':'Off','Kantutjämning':'Anti-aliasing','Jämnar ut hackiga kanter':'Smooths jagged edges','Effektkvalitet':'Effects quality','Partiklar, ljuskällor och damm i luften':'Particles, light sources and dust in the air','Siktavstånd':'Render distance','Hur långt bort världen ritas':'How far the world is drawn','Kort':'Short','Långt':'Far','Efterbehandling':'Post-processing','Ljus, färger och djup efter att bilden ritats':'Light, colour and depth after the image is drawn','Starkt ljus glöder':'Bright light glows','Ambient ocklusion':'Ambient occlusion','Mjuka skuggor i hörn och skarvar · Hög och Ultra':'Soft shadows in corners and seams · High and Ultra','Solstrålar':'Sun rays','Ljusstrålar från solen · Hög och Ultra':'Light shafts from the sun · High and Ultra','Skärpedjup i lobbyn':'Lobby depth of field','Bakgrunden blir mjukt suddig · Hög och Ultra':'The background gets softly blurred · High and Ultra','Rörelseoskärpa':'Motion blur','Bilden suddas lite när du vänder dig snabbt':'The image blurs a little when you turn fast','Volym':'Volume','Huvudvolym':'Master volume','Allt ljud i spelet':'All sound in the game','Musik':'Music','Musiken i lobbyn':'Music in the lobby','Ljudeffekter':'Sound effects','Skott, steg, explosioner och menyljud':'Shots, footsteps, explosions and menu sounds','Röstchatt':'Voice chat','Spelet har ingen röstchatt än. Nivån sparas till dess.':'The game has no voice chat yet. The level is saved until then.','Mus':'Mouse','Muskänslighet':'Mouse sensitivity','Hur snabbt du vänder dig':'How fast you turn','Känslighet vid sikte':'Aim sensitivity','Gånger muskänsligheten när du siktar':'Multiplies mouse sensitivity while aiming','Invertera mus':'Invert mouse','Musen upp tittar ner':'Mouse up looks down','Sikta med klick':'Click to aim','Ett klick på höger knapp siktar, ett till släpper':'One right click aims, another releases','Tangenter':'Keys','Klicka på en tangent och tryck sedan på den nya. Esc avbryter. Används tangenten redan byter de två plats.':'Click a key, then press the new one. Esc cancels. If the key is already used, the two swap.','Återställ tangenter':'Reset keys','Handkontroll':'Controller','Status':'Status','Använd handkontroll':'Use controller','Xbox, PlayStation och andra handkontroller':'Xbox, PlayStation and other controllers','Spakkänslighet':'Stick sensitivity','Hur snabbt höger spak vänder dig':'How fast the right stick turns you','Dödzon':'Dead zone','Hur långt spaken måste föras innan något händer':'How far the stick must move before anything happens','Invertera spak':'Invert stick','Höger spak upp tittar ner':'Right stick up looks down','Vibration':'Vibration','När du skjuter och tar skada':'When you shoot and take damage','Skjut':'Fire','Sikta':'Aim','Hoppa':'Jump','Ducka':'Crouch','Ladda om':'Reload','Byt vapen':'Switch weapon','Granat':'Grenade','Sparka':'Kick','Spring':'Sprint','Inspektera':'Inspect','Upp':'Up','Ner':'Down','Ficklampa':'Flashlight','Ligga ner':'Go prone','V / H':'L / R','Luta':'Lean','Poängtavla':'Scoreboard','Paus':'Pause','Allmänt':'General','Språk':'Language','Synfält':'Field of view','Hur mycket av världen du ser':'How much of the world you see','Kameraskakning':'Camera shake','Vid explosioner, landningar och glidningar':'From explosions, landings and slides','Huvudgungning':'Head bob','Speakerröst':'Announcer','En röst som ropar ut rundan när den börjar':'A voice that calls out each round as it starts','Kameran gungar när du går':'The camera bobs when you walk','HUD-storlek':'HUD size','Skadesiffror':'Damage numbers','Siffror som visar hur mycket du träffar för':'Numbers that show how much damage you deal','Skadeindikator':'Damage indicator','Pilar som visar varifrån skotten kommer':'Arrows that show where shots come from','Träffmarkering':'Hit marker','Krysset när du träffar':'The cross when you hit','Notiser':'Notifications','Uppdrag och belöningar under matchen':'Quests and rewards during the match','FPS och ping':'FPS and ping','Bildtakt och fördröjning i hörnet':'Frame rate and latency in the corner','Skärmeffekter':'Screen effects','Röd kant när du tar skada':'Red edge when you take damage','Färgtema':'Colour theme','Accentfärg i menyerna':'Accent colour in the menus','Skymning':'Dusk','Is':'Ice','Gift':'Toxic','Grafit':'Graphite','Hårkors':'Crosshair','Stil':'Style','Kors':'Cross','Kors och punkt':'Cross and dot','Punkt':'Dot','Färg':'Colour','Vit':'White','Grön':'Green','Gul':'Yellow','Rosa':'Pink','Röd':'Red','Längd':'Length','Tjocklek':'Thickness','Mellanrum':'Gap','Synlighet':'Opacity','Kontur':'Outline','Svart kant runt hårkorset':'Black edge around the crosshair','Rörligt hårkors':'Dynamic crosshair','Glider isär när du rör dig och skjuter':'Spreads out when you move and shoot','Återställ standard':'Reset to defaults','Allt sparas direkt':'Everything saves instantly','Klar':'Done','Gå framåt':'Move forward','Gå bakåt':'Move back','Gå vänster':'Move left','Gå höger':'Move right','Ducka / glida':'Crouch / slide','Primärvapen':'Primary weapon','Sekundärvapen':'Secondary weapon','Kasta granat':'Throw grenade','Inspektera vapnet':'Inspect weapon','Luta vänster':'Lean left','Luta höger':'Lean right','Lyfta guldpottan':'Lift the golden pot','Skjutbanan: byt vapen':'Range: switch weapon','Skjutbanan: starta utmaningen':'Range: start challenge','Skjutbanan: nollställ':'Range: reset',
+ 'Inställningar':'Settings','byt kategori':'switch category','nästa val':'next option','Stäng':'Close','Kategorier':'Categories','Grafik':'Graphics','Bild, kvalitet och effekter':'Display, quality and effects','Ljud':'Audio','Volym för allt du hör':'Volume for everything you hear','Kontroller':'Controls','Tangenter, mus och handkontroll':'Keys, mouse and controller','Spel':'Gameplay','Språk, HUD och hårkors':'Language, HUD and crosshair','Bild':'Display','Upplösning':'Resolution','Visningsläge':'Display mode','Fönster':'Windowed','Helskärm':'Fullscreen','Helskärm döljer webbläsarens ramar':'Fullscreen hides the browser frame','Av ger kortare fördröjning men mer arbete för datorn':'Off lowers latency but makes the computer work harder','FPS-gräns':'FPS limit','Högsta antal bilder per sekund':'Maximum frames per second','Obegränsad':'Unlimited','Sänker upplösningen lite när bildtakten faller':'Lowers the resolution a little when the frame rate drops','Kvalitet':'Quality','Grafikkvalitet':'Graphics quality','Anpassad':'Custom','Ställer in alla val nedanför på en gång':'Sets every option below at once','Låg':'Low','Medel':'Medium','Hög':'High','Texturkvalitet':'Texture quality','Skärpa på ytor som syns snett':'Sharpness on surfaces seen at an angle','Skuggkvalitet':'Shadow quality','Upplösning och mjukhet på skuggorna':'Resolution and softness of shadows','Av':'Off','Kantutjämning':'Anti-aliasing','Jämnar ut hackiga kanter':'Smooths jagged edges','Effektkvalitet':'Effects quality','Partiklar, ljuskällor och damm i luften':'Particles, light sources and dust in the air','Siktavstånd':'Render distance','Hur långt bort världen ritas':'How far the world is drawn','Kort':'Short','Långt':'Far','Efterbehandling':'Post-processing','Ljus, färger och djup efter att bilden ritats':'Light, colour and depth after the image is drawn','Starkt ljus glöder':'Bright light glows','Ambient ocklusion':'Ambient occlusion','Mjuka skuggor i hörn och skarvar · Hög och Ultra':'Soft shadows in corners and seams · High and Ultra','Solstrålar':'Sun rays','Ljusstrålar från solen · Hög och Ultra':'Light shafts from the sun · High and Ultra','Skärpedjup i lobbyn':'Lobby depth of field','Bakgrunden blir mjukt suddig · Hög och Ultra':'The background gets softly blurred · High and Ultra','Bildskärpa':'Sharpening','Skarpare kanter och detaljer i bilden':'Crisper edges and detail in the picture','Rörelseoskärpa':'Motion blur','Bilden suddas lite när du vänder dig snabbt':'The image blurs a little when you turn fast','Volym':'Volume','Huvudvolym':'Master volume','Allt ljud i spelet':'All sound in the game','Musik':'Music','Musiken i lobbyn':'Music in the lobby','Ljudeffekter':'Sound effects','Skott, steg, explosioner och menyljud':'Shots, footsteps, explosions and menu sounds','Röstchatt':'Voice chat','Spelet har ingen röstchatt än. Nivån sparas till dess.':'The game has no voice chat yet. The level is saved until then.','Mus':'Mouse','Muskänslighet':'Mouse sensitivity','Hur snabbt du vänder dig':'How fast you turn','Känslighet vid sikte':'Aim sensitivity','Gånger muskänsligheten när du siktar':'Multiplies mouse sensitivity while aiming','Invertera mus':'Invert mouse','Musen upp tittar ner':'Mouse up looks down','Sikta med klick':'Click to aim','Ett klick på höger knapp siktar, ett till släpper':'One right click aims, another releases','Tangenter':'Keys','Klicka på en tangent och tryck sedan på den nya. Esc avbryter. Används tangenten redan byter de två plats.':'Click a key, then press the new one. Esc cancels. If the key is already used, the two swap.','Återställ tangenter':'Reset keys','Handkontroll':'Controller','Status':'Status','Använd handkontroll':'Use controller','Xbox, PlayStation och andra handkontroller':'Xbox, PlayStation and other controllers','Spakkänslighet':'Stick sensitivity','Hur snabbt höger spak vänder dig':'How fast the right stick turns you','Dödzon':'Dead zone','Hur långt spaken måste föras innan något händer':'How far the stick must move before anything happens','Invertera spak':'Invert stick','Höger spak upp tittar ner':'Right stick up looks down','Vibration':'Vibration','När du skjuter och tar skada':'When you shoot and take damage','Skjut':'Fire','Sikta':'Aim','Hoppa':'Jump','Ducka':'Crouch','Ladda om':'Reload','Byt vapen':'Switch weapon','Granat':'Grenade','Sparka':'Kick','Spring':'Sprint','Inspektera':'Inspect','Upp':'Up','Ner':'Down','Ficklampa':'Flashlight','Ligga ner':'Go prone','V / H':'L / R','Luta':'Lean','Poängtavla':'Scoreboard','Paus':'Pause','Allmänt':'General','Språk':'Language','Synfält':'Field of view','Hur mycket av världen du ser':'How much of the world you see','Kameraskakning':'Camera shake','Vid explosioner, landningar och glidningar':'From explosions, landings and slides','Huvudgungning':'Head bob','Speakerröst':'Announcer','En röst som ropar ut rundan när den börjar':'A voice that calls out each round as it starts','Kameran gungar när du går':'The camera bobs when you walk','HUD-storlek':'HUD size','Skadesiffror':'Damage numbers','Siffror som visar hur mycket du träffar för':'Numbers that show how much damage you deal','Skadeindikator':'Damage indicator','Pilar som visar varifrån skotten kommer':'Arrows that show where shots come from','Träffmarkering':'Hit marker','Krysset när du träffar':'The cross when you hit','Notiser':'Notifications','Uppdrag och belöningar under matchen':'Quests and rewards during the match','FPS och ping':'FPS and ping','Bildtakt och fördröjning i hörnet':'Frame rate and latency in the corner','Skärmeffekter':'Screen effects','Röd kant när du tar skada':'Red edge when you take damage','Färgtema':'Colour theme','Accentfärg i menyerna':'Accent colour in the menus','Skymning':'Dusk','Is':'Ice','Gift':'Toxic','Grafit':'Graphite','Hårkors':'Crosshair','Stil':'Style','Kors':'Cross','Kors och punkt':'Cross and dot','Punkt':'Dot','Färg':'Colour','Vit':'White','Grön':'Green','Gul':'Yellow','Rosa':'Pink','Röd':'Red','Längd':'Length','Tjocklek':'Thickness','Mellanrum':'Gap','Synlighet':'Opacity','Kontur':'Outline','Svart kant runt hårkorset':'Black edge around the crosshair','Rörligt hårkors':'Dynamic crosshair','Glider isär när du rör dig och skjuter':'Spreads out when you move and shoot','Återställ standard':'Reset to defaults','Allt sparas direkt':'Everything saves instantly','Klar':'Done','Gå framåt':'Move forward','Gå bakåt':'Move back','Gå vänster':'Move left','Gå höger':'Move right','Ducka / glida':'Crouch / slide','Primärvapen':'Primary weapon','Sekundärvapen':'Secondary weapon','Kasta granat':'Throw grenade','Inspektera vapnet':'Inspect weapon','Luta vänster':'Lean left','Luta höger':'Lean right','Lyfta guldpottan':'Lift the golden pot','Skjutbanan: byt vapen':'Range: switch weapon','Skjutbanan: starta utmaningen':'Range: start challenge','Skjutbanan: nollställ':'Range: reset',
  // version 18: koder
  'Lös in kod':'Redeem code','Koder ger paket och belöningar · varje kod funkar en gång':'Codes give packs and rewards · each code works once','Skriv koden här':'Enter the code here','Lös in':'Redeem',
  // allmänt och HUD
  'ROST':'RUST','FROST':'FROST','Rost':'Rust','Spelare':'Player','Du':'You','Någon':'Someone','En vän':'A friend','lokal':'local',
- 'STÅENDE':'STANDING','LIGGER':'PRONE','DUCKAR':'CROUCHING','GLIDER':'SLIDING','SPRINGER':'SPRINTING','UTE':'OUT','FICKLAMPA':'FLASHLIGHT','HÄLSA':'HEALTH',
+ 'STÅENDE':'STANDING','LIGGER':'PRONE','DUCKAR':'CROUCHING','GLIDER':'SLIDING','SPRINGER':'SPRINTING','UTE':'OUT','DITT LAG ÄR UTE':'YOUR TEAM IS OUT','ALLA FIENDER ÄR UTE':'ALL ENEMIES ARE DOWN','ALLA ÄR SKYDDADE · INGEN KAN SKJUTA ÄN':'EVERYONE IS PROTECTED · NO SHOOTING YET','FICKLAMPA':'FLASHLIGHT','HÄLSA':'HEALTH',
  'TRÄNING':'PRACTICE','VÄNTAR PÅ SPELARE':'WAITING FOR PLAYERS','VÄNTAR PÅ ALLA SPELARE':'WAITING FOR ALL PLAYERS','GÖR DIG REDO':'GET READY',
  'OAVGJORT':'DRAW','VUNNEN':'WON','FÖRLORAD':'LOST','AVBRUTEN':'ABORTED','MATCHEN':'MATCH',
  'GULDPOTTAN':GTU,'Guldpottan':GT,'guldpottan':GT,'DU BÄR GULDPOTTAN · SPRING TILL ER ZON':"YOU'RE CARRYING THE "+GTU+' · RUN TO YOUR ZONE',
